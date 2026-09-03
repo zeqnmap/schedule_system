@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Преподаватели и нагрузка | Расписание</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>[v-cloak] { display: none; }</style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen">
+    <div id="app" v-cloak class="max-w-7xl mx-auto p-6 lg:p-8">
+
+        <!-- Шапка с крупной навигацией -->
+        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 pb-6 border-b border-slate-200">
+            <div>
+                <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Преподаватели</h1>
+                <p class="text-slate-500 text-lg mt-1 font-medium">Контроль недельной нагрузки и закрепленных кабинетов</p>
+            </div>
+            <nav class="flex flex-wrap gap-3">
+                <a href="groups_subjects.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    📁 Группы и предметы
+                </a>
+                <a href="teachers.html"
+                   class="bg-emerald-600 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm transition-all duration-150">
+                    👥 Преподаватели
+                </a>
+                <a href="admin.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    🔗 Учебные планы
+                </a>
+                <a href="index.html"
+                   class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm transition-all duration-150 active:scale-95">
+                    📅 Расписание
+                </a>
+            </nav>
+        </header>
+
+        <!-- Форма добавления нового преподавателя -->
+        <div class="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 mb-10">
+            <h2 class="text-2xl font-bold text-slate-900 mb-6">➕ Добавить преподавателя</h2>
+            <form @submit.prevent="addTeacher" class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">ФИО преподавателя</label>
+                    <input v-model="newTeacher.name" type="text" required placeholder="Например: Сидоров С.С."
+                           class="w-full text-base border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Кабинет по умолчанию</label>
+                    <input v-model="newTeacher.default_room" type="text" required placeholder="Например: 204"
+                           class="w-full text-base border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Макс. часов в неделю</label>
+                    <input v-model.number="newTeacher.max_hours_per_week" type="number" required placeholder="30"
+                           class="w-full text-base border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
+                </div>
+                <div class="flex items-end">
+                    <button type="submit"
+                            class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-3 rounded-xl shadow-md transition-all duration-150 active:scale-95 cursor-pointer">
+                        Добавить преподавателя
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Сетка карточек преподавателей -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div v-for="t in teachers" :key="t.id"
+                 class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition-all duration-200">
+
+                <div>
+                    <div class="flex justify-between items-start gap-2 mb-3">
+                        <h3 class="text-2xl font-extrabold text-slate-900 tracking-tight leading-tight">{{ t.name }}</h3>
+                        <button @click="deleteTeacher(t.id)"
+                                class="bg-red-50 hover:bg-red-600 text-red-600 hover:text-white font-bold px-3 py-1.5 rounded-xl text-xs transition-all duration-150 active:scale-95 shrink-0">
+                            Удалить
+                        </button>
+                    </div>
+
+                    <div class="inline-block bg-slate-100 text-slate-700 font-bold px-3 py-1 rounded-lg text-sm mb-6">
+                        Кабинет {{ t.default_room }}
+                    </div>
+
+                    <!-- Статистика часов -->
+                    <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 mb-6">
+                        <div class="flex justify-between items-center text-base">
+                            <span class="text-slate-600 font-medium">Забито в неделю:</span>
+                            <span class="font-extrabold text-xl text-slate-900">{{ t.assigned_weekly_hours }} ч.</span>
+                        </div>
+                        <div class="flex justify-between items-center text-base">
+                            <span class="text-slate-600 font-medium">Лимит (максимум):</span>
+                            <span class="font-bold text-base text-slate-700">{{ t.max_hours_per_week }} ч.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Динамический статус нагрузки -->
+                <div>
+                    <div v-if="t.assigned_weekly_hours > t.max_hours_per_week"
+                         class="bg-red-100 text-red-800 border-2 border-red-300 font-bold text-sm px-4 py-3 rounded-xl text-center">
+                        ⚠️ Перегруз (+{{ (t.assigned_weekly_hours - t.max_hours_per_week).toFixed(1) }} ч.)
+                    </div>
+                    <div v-else-if="t.assigned_weekly_hours === 0"
+                         class="bg-slate-100 text-slate-500 font-bold text-sm px-4 py-3 rounded-xl text-center">
+                        Нагрузка не назначена
+                    </div>
+                    <div v-else
+                         class="bg-emerald-100 text-emerald-800 border-2 border-emerald-300 font-bold text-sm px-4 py-3 rounded-xl text-center">
+                        ✅ Норма (свободно {{ (t.max_hours_per_week - t.assigned_weekly_hours).toFixed(1) }} ч.)
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const teachers = ref([]);
+                const newTeacher = ref({ name: '', default_room: '', max_hours_per_week: 30 });
+
+                const fetchTeachers = async () => {
+                    const res = await fetch('http://localhost:8000/teachers-workload/');
+                    if (res.ok) teachers.value = await res.json();
+                };
+
+                onMounted(fetchTeachers);
+
+                const addTeacher = async () => {
+                    const res = await fetch('http://localhost:8000/teachers/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newTeacher.value)
+                    });
+                    if (res.ok) {
+                        newTeacher.value = { name: '', default_room: '', max_hours_per_week: 30 };
+                        fetchTeachers();
+                    }
+                };
+
+                const deleteTeacher = async (id) => {
+                    if (!confirm('Точно удалить этого преподавателя?')) return;
+                    const res = await fetch(`http://localhost:8000/teachers/${id}`, { method: 'DELETE' });
+                    if (res.ok) fetchTeachers();
+                };
+
+                return { teachers, newTeacher, addTeacher, deleteTeacher };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

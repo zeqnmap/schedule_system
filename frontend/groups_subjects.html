@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Группы и предметы | Расписание</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>[v-cloak] { display: none; }</style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen">
+    <div id="app" v-cloak class="max-w-7xl mx-auto p-6 lg:p-8">
+
+        <!-- Навигация -->
+        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 pb-6 border-b border-slate-200">
+            <div>
+                <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Группы и предметы</h1>
+                <p class="text-slate-500 text-lg mt-1 font-medium">Создайте предметы один раз, чтобы затем назначать их группам</p>
+            </div>
+
+            <nav class="flex flex-wrap gap-3">
+                <a href="groups_subjects.html"
+                   class="bg-emerald-600 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm">
+                    📁 Группы и предметы
+                </a>
+                <a href="teachers.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    👥 Преподаватели
+                </a>
+                <a href="admin.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    🔗 Учебные планы
+                </a>
+                <a href="index.html"
+                   class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm transition-all duration-150 active:scale-95">
+                    📅 Расписание
+                </a>
+            </nav>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+
+            <!-- ГРУППЫ -->
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col">
+                <h2 class="text-2xl font-bold text-slate-900 mb-6 border-b border-slate-100 pb-3">Учебные группы</h2>
+
+                <form @submit.prevent="saveGroup" class="mb-8 space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700 mb-2">Номер группы</label>
+                        <input v-model.number="newGroup.number" type="number" required placeholder="Например: 451"
+                               class="w-full text-lg border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
+                    </div>
+                    <div class="flex gap-3">
+                        <button type="submit"
+                                class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-3 rounded-xl shadow-md transition-all duration-150 active:scale-95 cursor-pointer">
+                            {{ editingGroupId ? '💾 Сохранить номер' : '➕ Добавить группу' }}
+                        </button>
+                        <button v-if="editingGroupId" @click="resetGroupForm" type="button"
+                                class="px-5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-xl text-base transition-all duration-150 active:scale-95">
+                            Отмена
+                        </button>
+                    </div>
+                </form>
+
+                <div class="space-y-3 overflow-y-auto max-h-[500px] pr-2">
+                    <div v-for="g in groups" :key="g.id"
+                         class="flex justify-between items-center p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:border-slate-300 transition-colors">
+                        <span class="font-extrabold text-xl text-slate-800 tracking-wide">Группа {{ g.number }}</span>
+                        <div class="flex items-center gap-2">
+                            <button @click="editGroup(g)"
+                                    class="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-150 active:scale-95">
+                                Изменить
+                            </button>
+                            <button @click="deleteGroup(g.id)"
+                                    class="bg-red-50 hover:bg-red-600 text-red-600 hover:text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-150 active:scale-95">
+                                Удалить
+                            </button>
+                        </div>
+                    </div>
+                    <div v-if="groups.length === 0" class="text-center text-slate-400 py-6 font-medium">
+                        Список групп пуст
+                    </div>
+                </div>
+            </div>
+
+            <!-- ПРЕДМЕТЫ -->
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col">
+                <h2 class="text-2xl font-bold text-slate-900 mb-6 border-b border-slate-100 pb-3">Предметы (Общий каталог)</h2>
+
+                <form @submit.prevent="addSubject" class="mb-8 space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700 mb-2">Название дисциплины</label>
+                        <input v-model="newSubject.name" type="text" required placeholder="Например: Английский язык"
+                               class="w-full text-lg border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
+                    </div>
+                    <button type="submit"
+                            class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-3 rounded-xl shadow-md transition-all duration-150 active:scale-95 cursor-pointer">
+                        ➕ Добавить предмет
+                    </button>
+                </form>
+
+                <div class="space-y-3 overflow-y-auto max-h-[500px] pr-2">
+                    <div v-for="s in subjects" :key="s.id"
+                         class="flex justify-between items-center p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:border-slate-300 transition-colors">
+                        <span class="font-bold text-lg text-slate-800">{{ s.name }}</span>
+                        <button @click="deleteSubject(s.id)"
+                                class="bg-red-50 hover:bg-red-600 text-red-600 hover:text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-150 active:scale-95">
+                            Удалить
+                        </button>
+                    </div>
+                    <div v-if="subjects.length === 0" class="text-center text-slate-400 py-6 font-medium">
+                        Предметы еще не созданы. Добавьте первый предмет через поле выше.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const groups = ref([]);
+                const subjects = ref([]);
+                const newGroup = ref({ number: null });
+                const editingGroupId = ref(null);
+                const newSubject = ref({ name: '' });
+
+                const fetchData = async () => {
+                    try {
+                        const gRes = await fetch('http://localhost:8000/groups/');
+                        if (gRes.ok) groups.value = await gRes.json();
+
+                        const sRes = await fetch('http://localhost:8000/subjects/');
+                        if (sRes.ok) subjects.value = await sRes.json();
+                    } catch (e) {
+                        console.error("Ошибка загрузки:", e);
+                    }
+                };
+
+                onMounted(fetchData);
+
+                const saveGroup = async () => {
+                    const url = editingGroupId.value ? `http://localhost:8000/groups/${editingGroupId.value}` : 'http://localhost:8000/groups/';
+                    const method = editingGroupId.value ? 'PUT' : 'POST';
+
+                    const res = await fetch(url, {
+                        method: method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newGroup.value)
+                    });
+                    if (res.ok) {
+                        resetGroupForm();
+                        fetchData();
+                    }
+                };
+
+                const editGroup = (g) => {
+                    editingGroupId.value = g.id;
+                    newGroup.value = { number: g.number };
+                };
+
+                const resetGroupForm = () => {
+                    editingGroupId.value = null;
+                    newGroup.value = { number: null };
+                };
+
+                const deleteGroup = async (id) => {
+                    if (!confirm('Точно удалить эту группу?')) return;
+                    const res = await fetch(`http://localhost:8000/groups/${id}`, { method: 'DELETE' });
+                    if (res.ok) fetchData();
+                };
+
+                const addSubject = async () => {
+                    try {
+                        const res = await fetch('http://localhost:8000/subjects/', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newSubject.value)
+                        });
+                        if (res.ok) {
+                            newSubject.value.name = '';
+                            fetchData();
+                        } else {
+                            alert("Ошибка добавления предмета. Убедитесь, что сервер перезапущен после добавления модели.");
+                        }
+                    } catch (e) {
+                        alert("Не удалось связаться с сервером");
+                    }
+                };
+
+                const deleteSubject = async (id) => {
+                    if (!confirm('Точно удалить этот предмет?')) return;
+                    const res = await fetch(`http://localhost:8000/subjects/${id}`, { method: 'DELETE' });
+                    if (res.ok) fetchData();
+                };
+
+                return {
+                    groups, subjects, newGroup, editingGroupId, newSubject,
+                    saveGroup, editGroup, resetGroupForm, deleteGroup,
+                    addSubject, deleteSubject
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

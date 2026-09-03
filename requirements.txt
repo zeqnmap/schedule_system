@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+sqlalchemy
+ortools>=9.15.6755
+pydantic

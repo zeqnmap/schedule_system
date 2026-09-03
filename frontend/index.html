@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Расписание | Управление</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+        [v-cloak] { display: none; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen">
+    <div id="app" v-cloak class="max-w-7xl mx-auto p-6 lg:p-8">
+
+        <!-- Шапка с крупной навигацией -->
+        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 pb-6 border-b border-slate-200">
+            <div>
+                <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Расписание занятий</h1>
+                <p class="text-slate-500 text-lg mt-1 font-medium">Автоматическая генерация и ручное управление парами</p>
+            </div>
+
+            <nav class="flex flex-wrap gap-3">
+                <a href="groups_subjects.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    📁 Группы и предметы
+                </a>
+                <a href="teachers.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    👥 Преподаватели
+                </a>
+                <a href="admin.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    🔗 Учебные планы
+                </a>
+                <a href="progress.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    📊 Выполнение часов
+                </a>
+                <button @click="generateSchedule"
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base px-6 py-3 rounded-2xl shadow-md transition-all duration-150 active:scale-95 cursor-pointer">
+                    ⚡ Сгенерировать полугодие
+                </button>
+            </nav>
+        </header>
+
+        <!-- Фильтры и архивация -->
+        <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-8 flex flex-wrap gap-6 items-center justify-between">
+            <div class="flex flex-wrap items-center gap-6">
+                <div class="flex items-center gap-3">
+                    <span class="font-bold text-lg text-slate-700">Группа:</span>
+                    <select v-model="selectedGroupId"
+                            class="bg-slate-50 border-2 border-slate-200 text-lg font-bold rounded-xl px-4 py-2.5 outline-none focus:border-blue-500 transition-all">
+                        <option v-for="group in groups" :key="group.id" :value="group.id">
+                            Группа {{ group.number }}
+                        </option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="font-bold text-lg text-slate-700">Неделя:</span>
+                    <select v-model="selectedWeek"
+                            class="bg-slate-50 border-2 border-slate-200 text-lg font-bold rounded-xl px-4 py-2.5 outline-none focus:border-blue-500 transition-all">
+                        <option v-for="w in 20" :key="w" :value="w">
+                            Неделя {{ w }}
+                        </option>
+                    </select>
+                </div>
+            </div>
+
+            <button @click="toggleArchive"
+                    :class="isArchived ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-2 border-slate-300'"
+                    class="px-6 py-3 rounded-2xl font-bold text-base transition-all duration-150 active:scale-95 shadow-sm cursor-pointer">
+                <span v-if="isArchived">🔒 Неделя закрыта (Разблокировать)</span>
+                <span v-else>📦 Заархивировать неделю</span>
+            </button>
+        </div>
+
+        <!-- Баннер блокировки недели -->
+        <div v-if="isArchived" class="bg-amber-50 border-2 border-amber-300 text-amber-900 px-6 py-4 rounded-2xl mb-8 font-semibold text-base">
+            🔒 Эта неделя утверждена и заархивирована. Редактирование и генерация заблокированы.
+        </div>
+
+        <!-- Сетка расписания -->
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-6">
+            <div v-for="day in 5" :key="day" class="flex flex-col gap-4">
+                <h2 class="text-center font-extrabold text-slate-700 uppercase tracking-wider text-base mb-1">
+                    {{ getDayName(day) }}
+                </h2>
+
+                <div v-for="slot in 5" :key="slot"
+                     class="min-h-[120px] bg-slate-50 rounded-2xl border-2 border-dashed border-slate-300 p-3 relative group flex flex-col justify-center items-center transition-all">
+
+                    <span class="absolute top-2 left-3 text-xs text-slate-400 font-extrabold">{{ slot }} пара</span>
+
+                    <!-- Занятая пара -->
+                    <div v-if="getEntry(day, slot)"
+                         @click="openEditModal(getEntry(day, slot))"
+                         :class="isArchived ? 'cursor-not-allowed opacity-90' : 'cursor-pointer hover:shadow-lg hover:border-blue-400 active:scale-95'"
+                         class="w-full mt-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200 transition-all duration-150">
+                        <div class="font-extrabold text-slate-900 text-base mb-2">
+                            {{ getEntry(day, slot).subject_name }}
+                        </div>
+                        <div class="text-xs text-slate-600 flex justify-between items-center font-semibold">
+                            <span class="truncate mr-2">
+                                {{ getTeacherName(getEntry(day, slot).teacher_id) }}
+                                <span v-if="getEntry(day, slot).teacher2_id">, {{ getTeacherName(getEntry(day, slot).teacher2_id) }}</span>
+                            </span>
+                            <span class="bg-blue-50 text-blue-700 px-2 py-1 rounded-md shrink-0">Каб. {{ getEntry(day, slot).room }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Пустой слот с кнопкой добавления -->
+                    <div v-else>
+                        <button v-if="!isArchived" @click="openCreateModal(day, slot)"
+                                class="text-sm bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-xl shadow-sm opacity-0 group-hover:opacity-100 transition-all duration-150 active:scale-95 cursor-pointer mt-4">
+                            ➕ Добавить
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Модальное окно -->
+        <Transition name="fade">
+            <div v-if="modalMode" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100">
+                    <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                        <h3 class="text-2xl font-bold text-slate-900">
+                            {{ modalMode === 'edit' ? '✏️ Изменить пару' : '➕ Добавить пару' }}
+                        </h3>
+                        <button @click="modalMode = null" class="text-slate-400 hover:text-slate-600 text-2xl font-bold">✕</button>
+                    </div>
+
+                    <div class="p-6 space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1">Предмет (из плана группы)</label>
+                            <select v-model="selectedPlanId" @change="onPlanChange"
+                                    class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-blue-500 outline-none">
+                                <option :value="null">--- Выберите предмет ---</option>
+                                <option v-for="p in groupPlans" :key="p.id" :value="p.id">
+                                    {{ p.subject_name }} ({{ getTeacherName(p.teacher_id) }})
+                                </option>
+                            </select>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">День недели</label>
+                                <select v-model.number="form.day_of_week"
+                                        class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-blue-500 outline-none">
+                                    <option v-for="d in 5" :value="d">{{ getDayName(d) }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">Номер пары</label>
+                                <select v-model.number="form.time_slot"
+                                        class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-blue-500 outline-none">
+                                    <option v-for="s in 5" :value="s">{{ s }} пара</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1">Кабинет</label>
+                            <input v-model="form.room" type="text" required
+                                   class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-blue-500 outline-none">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">1-й Преподаватель</label>
+                                <select v-model.number="form.teacher_id" required
+                                        class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-blue-500 outline-none">
+                                    <option v-for="t in teachers" :value="t.id">{{ t.name }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">2-й Преподаватель</label>
+                                <select v-model.number="form.teacher2_id"
+                                        class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-blue-500 outline-none">
+                                    <option :value="null">--- Нет ---</option>
+                                    <option v-for="t in teachers" :value="t.id">{{ t.name }}</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p-6 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
+                        <button v-if="modalMode === 'edit'" @click="deleteEntry"
+                                class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-5 rounded-xl transition-all duration-150 active:scale-95 cursor-pointer">
+                            🗑️ Удалить пару
+                        </button>
+                        <div v-else></div>
+
+                        <div class="flex gap-3">
+                            <button @click="modalMode = null"
+                                    class="px-5 py-3 text-slate-600 hover:text-slate-800 font-bold rounded-xl transition-all duration-150">
+                                Отмена
+                            </button>
+                            <button @click="saveEntry"
+                                    class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl shadow-md transition-all duration-150 active:scale-95 cursor-pointer">
+                                💾 Сохранить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </Transition>
+
+        <!-- Всплывающее окно ошибок -->
+        <Transition name="fade">
+            <div v-if="errorMessage" class="fixed bottom-6 right-6 max-w-md bg-red-600 text-white p-5 rounded-2xl shadow-2xl flex items-start gap-3 z-50">
+                <div class="flex-1">
+                    <h4 class="font-extrabold text-base">Ошибка сохранения</h4>
+                    <p class="text-sm mt-1 text-red-100">{{ errorMessage }}</p>
+                </div>
+                <button @click="errorMessage = ''" class="text-white text-xl font-bold ml-2">✕</button>
+            </div>
+        </Transition>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+
+        createApp({
+            setup() {
+                const groups = ref([]);
+                const teachers = ref([]);
+                const plans = ref([]);
+                const schedule = ref([]);
+                const selectedGroupId = ref(null);
+                const selectedWeek = ref(1);
+                const isArchived = ref(false);
+
+                const modalMode = ref(null);
+                const form = ref({});
+                const selectedPlanId = ref(null);
+                const errorMessage = ref('');
+
+                const groupPlans = computed(() => plans.value.filter(p => p.group_id === Number(selectedGroupId.value)));
+
+                const fetchData = async () => {
+                    const [gRes, tRes, pRes] = await Promise.all([
+                        fetch('http://localhost:8000/groups/'),
+                        fetch('http://localhost:8000/teachers/'),
+                        fetch('http://localhost:8000/course_plans/')
+                    ]);
+                    if (gRes.ok) {
+                        groups.value = await gRes.json();
+                        if (groups.value.length > 0 && !selectedGroupId.value) {
+                            selectedGroupId.value = groups.value[0].id;
+                        }
+                    }
+                    if (tRes.ok) teachers.value = await tRes.json();
+                    if (pRes.ok) plans.value = await pRes.json();
+                };
+
+                const fetchSchedule = async () => {
+                    if (!selectedGroupId.value) return;
+                    const res = await fetch(`http://localhost:8000/schedule/?group_id=${selectedGroupId.value}&week_number=${selectedWeek.value}`);
+                    if (res.ok) schedule.value = await res.json();
+                };
+
+                const fetchArchiveStatus = async () => {
+                    if (!selectedGroupId.value) return;
+                    const res = await fetch(`http://localhost:8000/archived-weeks/status?group_id=${selectedGroupId.value}&week_number=${selectedWeek.value}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        isArchived.value = data.is_archived;
+                    }
+                };
+
+                const toggleArchive = async () => {
+                    if (!selectedGroupId.value) return;
+                    const res = await fetch('http://localhost:8000/archived-weeks/toggle', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ group_id: selectedGroupId.value, week_number: selectedWeek.value })
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        isArchived.value = data.is_archived;
+                    }
+                };
+
+                watch([selectedGroupId, selectedWeek], () => {
+                    fetchSchedule();
+                    fetchArchiveStatus();
+                });
+
+                onMounted(async () => {
+                    await fetchData();
+                    await fetchSchedule();
+                    await fetchArchiveStatus();
+                });
+
+                const getDayName = (dayNum) => ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница"][dayNum - 1];
+                const getTeacherName = (id) => teachers.value.find(t => t.id === id)?.name || `Преп. ${id}`;
+                const getEntry = (day, slot) => schedule.value.find(e => e.day_of_week === day && e.time_slot === slot);
+
+                const onPlanChange = () => {
+                    const plan = plans.value.find(p => p.id === selectedPlanId.value);
+                    if (plan) {
+                        form.value.subject_name = plan.subject_name;
+                        form.value.teacher_id = plan.teacher_id;
+                        form.value.teacher2_id = plan.teacher2_id;
+                        const teacher = teachers.value.find(t => t.id === plan.teacher_id);
+                        if (teacher) form.value.room = teacher.default_room;
+                    }
+                };
+
+                const openEditModal = (entry) => {
+                    if (isArchived.value) {
+                        errorMessage.value = "Неделя заархивирована. Изменения запрещены.";
+                        return;
+                    }
+                    modalMode.value = 'edit';
+                    form.value = { ...entry };
+                    const matchedPlan = plans.value.find(p => p.group_id === entry.group_id && p.subject_name === entry.subject_name);
+                    selectedPlanId.value = matchedPlan ? matchedPlan.id : null;
+                    errorMessage.value = '';
+                };
+
+                const openCreateModal = (day, slot) => {
+                    if (isArchived.value) return;
+                    modalMode.value = 'create';
+                    selectedPlanId.value = null;
+                    form.value = {
+                        week_number: selectedWeek.value,
+                        day_of_week: day,
+                        time_slot: slot,
+                        room: teachers.value[0]?.default_room || '101',
+                        teacher_id: teachers.value[0]?.id || null,
+                        teacher2_id: null,
+                        group_id: Number(selectedGroupId.value),
+                        subject_name: ''
+                    };
+                    errorMessage.value = '';
+                };
+
+                const saveEntry = async () => {
+                    try {
+                        let url = 'http://localhost:8000/schedule/';
+                        let method = 'POST';
+
+                        if (modalMode.value === 'edit') {
+                            url = `http://localhost:8000/schedule/${form.value.id}`;
+                            method = 'PUT';
+                        }
+
+                        const response = await fetch(url, {
+                            method: method,
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(form.value)
+                        });
+
+                        if (!response.ok) {
+                            const errData = await response.json();
+                            errorMessage.value = errData.detail.message || "Ошибка сохранения";
+                            return;
+                        }
+
+                        await fetchSchedule();
+                        modalMode.value = null;
+                    } catch (e) {
+                        errorMessage.value = 'Ошибка подключения к серверу';
+                    }
+                };
+
+                const deleteEntry = async () => {
+                    if (!confirm('Точно удалить эту пару с этой недели?')) return;
+                    try {
+                        const response = await fetch(`http://localhost:8000/schedule/${form.value.id}`, { method: 'DELETE' });
+                        if (!response.ok) {
+                            const errData = await response.json();
+                            errorMessage.value = errData.detail.message || "Ошибка удаления";
+                            return;
+                        }
+                        await fetchSchedule();
+                        modalMode.value = null;
+                    } catch (e) {
+                        errorMessage.value = 'Ошибка подключения к серверу';
+                    }
+                };
+
+                const generateSchedule = async () => {
+                    if (isArchived.value) {
+                        alert("Неделя заархивирована.");
+                        return;
+                    }
+                    const res = await fetch('http://localhost:8000/generate_schedule/', { method: 'POST' });
+                    if (res.ok) {
+                        await fetchSchedule();
+                        alert('Расписание успешно сгенерировано на полугодие!');
+                    }
+                };
+
+                return {
+                    groups, teachers, plans, schedule, selectedGroupId, selectedWeek, isArchived,
+                    modalMode, form, selectedPlanId, groupPlans, errorMessage, getDayName, getTeacherName, getEntry,
+                    onPlanChange, openEditModal, openCreateModal, saveEntry, deleteEntry, generateSchedule, toggleArchive
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

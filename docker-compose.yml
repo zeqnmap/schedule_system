@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend  # Прокидываем код, чтобы изменения применялись без перезапуска
+      - ./schedule.db:/app/schedule.db # База данных сохраняется снаружи контейнера

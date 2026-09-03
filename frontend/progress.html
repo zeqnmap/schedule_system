@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Выполнение часов | Расписание</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>[v-cloak] { display: none; }</style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen">
+    <div id="app" v-cloak class="max-w-7xl mx-auto p-6 lg:p-8">
+
+        <!-- Шапка -->
+        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 pb-6 border-b border-slate-200">
+            <div>
+                <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Выполнение часов</h1>
+                <p class="text-slate-500 text-lg mt-1 font-medium">Контроль нормы пар: сколько запланировано, сколько уже стоит и сколько осталось</p>
+            </div>
+
+            <nav class="flex flex-wrap gap-3">
+                <a href="groups_subjects.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    📁 Группы и предметы
+                </a>
+                <a href="teachers.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    👥 Преподаватели
+                </a>
+                <a href="admin.html"
+                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
+                    🔗 Учебные планы
+                </a>
+                <a href="progress.html"
+                   class="bg-emerald-600 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm">
+                    📊 Выполнение часов
+                </a>
+                <a href="index.html"
+                   class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm transition-all duration-150 active:scale-95">
+                    📅 Расписание
+                </a>
+            </nav>
+        </header>
+
+        <!-- Фильтр по группе и общая статистика -->
+        <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-10 flex flex-wrap items-center justify-between gap-6">
+            <div class="flex items-center gap-4">
+                <span class="text-lg font-bold text-slate-800">Фильтр по группе:</span>
+                <select v-model="selectedGroupFilter" @change="fetchProgress"
+                        class="text-lg font-bold border-2 border-slate-200 rounded-xl px-5 py-2.5 focus:border-emerald-500 outline-none bg-slate-50 transition-all">
+                    <option :value="null">Показать все группы</option>
+                    <option v-for="g in groups" :key="g.id" :value="g.id">Группа {{ g.number }}</option>
+                </select>
+            </div>
+
+            <button @click="fetchProgress"
+                    class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-base px-5 py-2.5 rounded-xl border border-slate-300 transition-all duration-150 active:scale-95 cursor-pointer">
+                🔄 Обновить данные
+            </button>
+        </div>
+
+        <!-- Сетка карточек предметов -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div v-for="item in progressItems" :key="item.plan_id"
+                 class="bg-white p-6 rounded-3xl shadow-sm border-2 transition-all duration-200 flex flex-col justify-between"
+                 :class="{
+                    'border-emerald-300 bg-emerald-50/20': item.diff === 0,
+                    'border-amber-300 bg-amber-50/20': item.diff < 0,
+                    'border-red-300 bg-red-50/20': item.diff > 0
+                 }">
+
+                <div>
+                    <!-- Заголовок и группа -->
+                    <div class="flex justify-between items-start gap-2 mb-3">
+                        <h3 class="text-2xl font-extrabold text-slate-900 leading-snug">{{ item.subject_name }}</h3>
+                        <span class="bg-slate-800 text-white font-extrabold text-xs px-3 py-1.5 rounded-xl shrink-0">
+                            Гр. {{ item.group_number }}
+                        </span>
+                    </div>
+
+                    <!-- Преподаватели -->
+                    <p class="text-sm font-semibold text-slate-600 mb-6">
+                        Преп: <span class="text-slate-900">{{ item.teacher_name }}</span>
+                        <span v-if="item.teacher2_name">, {{ item.teacher2_name }}</span>
+                    </p>
+
+                    <!-- Блок цифр (План / Факт) -->
+                    <div class="grid grid-cols-2 gap-3 bg-white/80 p-4 rounded-2xl border border-slate-200 mb-5">
+                        <div class="text-center border-r border-slate-200">
+                            <span class="block text-xs font-bold text-slate-400 uppercase tracking-wider">План (норма)</span>
+                            <span class="text-2xl font-black text-slate-800">{{ item.total_hours }} пар</span>
+                        </div>
+                        <div class="text-center">
+                            <span class="block text-xs font-bold text-slate-400 uppercase tracking-wider">В расписании</span>
+                            <span class="text-2xl font-black" :class="item.diff === 0 ? 'text-emerald-600' : (item.diff < 0 ? 'text-amber-600' : 'text-red-600')">
+                                {{ item.scheduled_hours }} пар
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Прогресс-бар -->
+                    <div class="mb-5">
+                        <div class="flex justify-between text-xs font-bold text-slate-500 mb-1.5">
+                            <span>Заполнено</span>
+                            <span>{{ item.raw_percentage }}%</span>
+                        </div>
+                        <div class="w-full bg-slate-200 h-3 rounded-full overflow-hidden">
+                            <div class="h-full rounded-full transition-all duration-300"
+                                 :class="{
+                                    'bg-emerald-500': item.diff === 0,
+                                    'bg-amber-500': item.diff < 0,
+                                    'bg-red-500': item.diff > 0
+                                 }"
+                                 :style="{ width: Math.min(item.percentage, 100) + '%' }">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Статус нормы (Что делать) -->
+                <div class="pt-2">
+                    <div v-if="item.diff === 0"
+                         class="bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold text-sm py-3 px-4 rounded-2xl text-center">
+                        ✅ Норма выполнена ({{ item.total_hours }} из {{ item.total_hours }})
+                    </div>
+                    <div v-else-if="item.diff < 0"
+                         class="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-sm py-3 px-4 rounded-2xl text-center">
+                        ⏳ Не хватает: {{ Math.abs(item.diff) }} пар (нужно добавить)
+                    </div>
+                    <div v-else
+                         class="bg-red-100 text-red-900 border border-red-300 font-extrabold text-sm py-3 px-4 rounded-2xl text-center">
+                        ⚠️ Перебор: +{{ item.diff }} пар (удалите лишние)
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div v-if="progressItems.length === 0" class="text-center text-slate-400 py-16 text-xl font-bold">
+            Учебные планы не найдены
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const groups = ref([]);
+                const progressItems = ref([]);
+                const selectedGroupFilter = ref(null);
+
+                const fetchGroups = async () => {
+                    const res = await fetch('http://localhost:8000/groups/');
+                    if (res.ok) groups.value = await res.json();
+                };
+
+                const fetchProgress = async () => {
+                    let url = 'http://localhost:8000/plans-progress/';
+                    if (selectedGroupFilter.value) {
+                        url += `?group_id=${selectedGroupFilter.value}`;
+                    }
+                    const res = await fetch(url);
+                    if (res.ok) {
+                        progressItems.value = await res.json();
+                    }
+                };
+
+                onMounted(async () => {
+                    await fetchGroups();
+                    await fetchProgress();
+                });
+
+                return { groups, progressItems, selectedGroupFilter, fetchProgress };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
