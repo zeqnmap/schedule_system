@@ -3,143 +3,162 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Учебные планы | Расписание</title>
+    <title>Учебные планы | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <style>[v-cloak] { display: none; }</style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
+        .bento-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 28px; box-shadow: 0 10px 40px -10px rgba(0,0,0,0.04); transition: all 0.3s ease; }
+        .bento-card:hover { box-shadow: 0 20px 40px -10px rgba(0,0,0,0.07); transform: translateY(-2px); }
+        .input-modern { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 16px; transition: all 0.2s ease; outline: none; }
+        .input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
+        .btn-emerald { background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; box-shadow: 0 8px 24px -6px rgba(16, 185, 129, 0.4); transition: all 0.2s ease; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
+        .btn-emerald:hover { box-shadow: 0 12px 32px -6px rgba(16, 185, 129, 0.5); transform: translateY(-2px); }
+        .btn-coral { background-color: #FFF1F2; color: #E11D48; transition: all 0.2s ease; cursor: pointer; border: 1px solid transparent; }
+        .btn-coral:hover { background-color: #FFE4E6; color: #BE123C; border-color: #FECDD3; }
+        ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+        [v-cloak] { display: none; }
+    </style>
 </head>
-<body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen">
-    <div id="app" v-cloak class="max-w-7xl mx-auto p-6 lg:p-8">
+<body class="text-slate-800 antialiased min-h-screen">
 
-        <!-- Шапка с крупной навигацией -->
-        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 pb-6 border-b border-slate-200">
-            <div>
-                <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Учебные планы</h1>
-                <p class="text-slate-500 text-lg mt-1 font-medium">Связывание групп, предметов, часов и преподавателей</p>
+    <nav class="fixed inset-x-0 top-0 z-50 bg-white/70 backdrop-blur-2xl border-b border-slate-200">
+        <div class="max-w-[1600px] mx-auto px-6 lg:px-10 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-[0_4px_20px_rgba(16,185,129,0.4)]"></div>
+                <span class="text-2xl font-black tracking-tighter text-slate-900">MGKAP<span class="text-slate-400 font-semibold ml-1">2026</span></span>
             </div>
-            <nav class="flex flex-wrap gap-3">
-                <a href="groups_subjects.html"
-                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
-                    📁 Группы и предметы
-                </a>
-                <a href="teachers.html"
-                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
-                    👥 Преподаватели
-                </a>
-                <a href="admin.html"
-                   class="bg-emerald-600 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm transition-all duration-150">
-                    🔗 Учебные планы
-                </a>
-                <a href="index.html"
-                   class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm transition-all duration-150 active:scale-95">
-                    📅 Расписание
-                </a>
-            </nav>
+            <div class="hidden lg:flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/50">
+                <a href="groups_subjects.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Группы и предметы</a>
+                <a href="teachers.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Преподаватели</a>
+                <a href="admin.html" class="px-5 py-2 rounded-xl text-sm font-bold bg-white text-slate-900 shadow-sm border border-slate-200/50">Назначение предмета</a>
+                <a href="progress.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Часы</a>
+                <a href="index.html" class="ml-2 px-6 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 shadow-md transition-all">Расписание</a>
+            </div>
+        </div>
+    </nav>
+
+    <div id="app" v-cloak class="max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
+
+        <header class="mb-12">
+            <h1 class="text-4xl lg:text-5xl font-black text-slate-900 tracking-tight leading-tight mb-2">Учебные планы</h1>
+            <p class="text-lg lg:text-xl text-slate-500 font-medium">Связывание групп, предметов, семестровых и недельных часов</p>
         </header>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
 
-            <!-- ФОРМА СВЯЗЫВАНИЯ -->
-            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 h-fit">
-                <h2 class="text-2xl font-bold mb-6 border-b border-slate-100 pb-3 text-slate-900">
-                    {{ editingPlanId ? '💾 Редактирование' : '➕ Назначить предмет' }}
+            <div class="xl:col-span-4 bento-card p-8 lg:p-10 h-max sticky top-28">
+                <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight mb-8">
+                    {{ editingPlanId ? 'Редактировать план' : 'Назначить предмет' }}
                 </h2>
 
                 <form @submit.prevent="savePlan" class="space-y-5">
                     <div>
-                        <label class="block text-sm font-semibold text-slate-700 mb-2">Учебная группа</label>
-                        <select v-model.number="planForm.group_id" required
-                                class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
-                            <option :value="null" disabled>--- Выберите группу ---</option>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Учебная группа</label>
+                        <select v-model.number="form.group_id" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer">
+                            <option :value="null">Выберите группу...</option>
                             <option v-for="g in groups" :key="g.id" :value="g.id">Группа {{ g.number }}</option>
                         </select>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-semibold text-slate-700 mb-2">Предмет (Дисциплина)</label>
-                        <select v-model="planForm.subject_name" required
-                                class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
-                            <option value="" disabled>--- Выберите предмет ---</option>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Дисциплина</label>
+                        <select v-model="form.subject_name" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer">
+                            <option value="">Выберите предмет...</option>
                             <option v-for="s in subjects" :key="s.id" :value="s.name">{{ s.name }}</option>
                         </select>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-semibold text-slate-700 mb-2">Всего часов на полугодие</label>
-                        <input v-model.number="planForm.total_hours" type="number" required placeholder="Например: 70"
-                               class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Часов на полугодие</label>
+                        <input v-model.number="form.total_hours" type="number" required placeholder="Напр. 70" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base">
+                    </div>
+
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Лимит (часов в неделю)</label>
+                        <input v-model.number="form.max_weekly_hours" type="number" required placeholder="Напр. 2" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base bg-white">
+                        <p class="text-[11px] font-semibold text-slate-400 mt-2 leading-relaxed">1 ч = одиночка. 2 ч = 1 пара. 4 ч = 2 пары.</p>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-semibold text-slate-700 mb-2">1-й Преподаватель (Основной)</label>
-                        <select v-model.number="planForm.teacher_id" required
-                                class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
-                            <option :value="null" disabled>--- Выберите преподавателя ---</option>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Основной преподаватель</label>
+                        <select v-model.number="form.teacher_id" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
+                            <option :value="null">Выберите преподавателя...</option>
                             <option v-for="t in teachers" :key="t.id" :value="t.id">{{ t.name }} (Каб. {{ t.default_room }})</option>
                         </select>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-semibold text-slate-700 mb-2">2-й Преподаватель (если пара делится)</label>
-                        <select v-model.number="planForm.teacher2_id"
-                                class="w-full text-base font-medium border-2 border-slate-200 rounded-xl px-4 py-3 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 outline-none transition-all">
-                            <option :value="null">--- Без второго преподавателя ---</option>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Второй преподаватель</label>
+                        <select v-model.number="form.teacher2_id" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
+                            <option :value="null">Нет</option>
                             <option v-for="t in teachers" :key="t.id" :value="t.id">{{ t.name }}</option>
                         </select>
                     </div>
 
-                    <div class="flex gap-3 pt-2">
-                        <button type="submit"
-                                class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-3 rounded-xl shadow-md transition-all duration-150 active:scale-95 cursor-pointer">
-                            {{ editingPlanId ? 'Сохранить план' : 'Связать и добавить' }}
+                    <div class="flex gap-3 pt-4">
+                        <button type="submit" class="flex-1 btn-emerald font-extrabold text-base py-4 rounded-2xl">
+                            {{ editingPlanId ? 'Сохранить изменения' : 'Связать и добавить' }}
                         </button>
-                        <button v-if="editingPlanId" @click="resetPlanForm" type="button"
-                                class="px-5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-base transition-all duration-150 active:scale-95">
+                        <button v-if="editingPlanId" @click="resetForm" type="button" class="px-6 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all">
                             Отмена
                         </button>
                     </div>
                 </form>
             </div>
 
-            <!-- СПИСОК ВСЕХ СВЯЗЕЙ -->
-            <div class="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col h-[760px]">
-                <h2 class="text-2xl font-bold mb-6 border-b border-slate-100 pb-3 text-slate-900">Назначенные дисциплины</h2>
+            <div class="xl:col-span-8 bento-card p-8 lg:p-10">
+                <div class="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
+                    <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Назначенные дисциплины</h2>
+                    <span class="bg-slate-100 text-slate-600 font-bold text-xs px-4 py-2 rounded-xl">Записей: {{ plans.length }}</span>
+                </div>
 
-                <div class="flex-1 overflow-y-auto pr-2 space-y-4">
-                    <div v-for="p in plans" :key="p.id"
-                         class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-5 rounded-2xl bg-slate-50 border border-slate-200 hover:border-slate-300 transition-colors">
+                <div class="space-y-4 overflow-y-auto max-h-[800px] pr-3">
+                    <div v-for="p in plans" :key="p.id" class="group flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 hover:shadow-md transition-all">
+
                         <div>
-                            <div class="flex items-center gap-3">
-                                <span class="text-xl font-extrabold text-slate-900 tracking-tight">{{ p.subject_name }}</span>
-                                <span class="bg-indigo-100 text-indigo-800 text-sm font-bold px-3 py-1 rounded-xl">
-                                    {{ p.total_hours }} ч. (~{{ (p.total_hours / 20).toFixed(1) }} ч/нед)
-                                </span>
+                            <div class="flex items-center gap-3 mb-2">
+                                <h3 class="font-black text-xl text-slate-900 tracking-tight">{{ p.subject_name }}</h3>
+                                <div class="flex gap-1.5">
+                                    <span class="bg-slate-100 text-slate-700 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-widest">{{ p.total_hours }} ч. всего</span>
+                                    <span class="bg-emerald-50 text-emerald-700 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-widest">Макс. {{ p.max_weekly_hours || 4 }} ч/нед</span>
+                                </div>
                             </div>
-                            <div class="text-sm text-slate-600 mt-2 font-medium">
-                                Группа: <strong class="text-slate-900 font-bold">Группа {{ getGroupNum(p.group_id) }}</strong> |
-                                Преп: <strong class="text-slate-900 font-bold">{{ getTeacherName(p.teacher_id) }}</strong>
-                                <span v-if="p.teacher2_id">, <strong class="text-slate-900 font-bold">{{ getTeacherName(p.teacher2_id) }}</strong></span>
+                            <div class="flex items-center gap-3 text-sm font-semibold text-slate-500">
+                                <span class="bg-slate-800 text-white px-2.5 py-0.5 rounded-md text-[11px] font-bold">Гр. {{ getGroupNumber(p.group_id) }}</span>
+                                <span>{{ getTeacherName(p.teacher_id) }} <template v-if="p.teacher2_id">+ {{ getTeacherName(p.teacher2_id) }}</template></span>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <button @click="editPlan(p)"
-                                    class="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-4 py-2 rounded-xl text-sm transition-all duration-150 active:scale-95">
+
+                        <div class="flex items-center gap-2 w-full sm:w-auto opacity-100 xl:opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button @click="editPlan(p)" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold px-4 py-2.5 rounded-xl text-sm transition-all border border-slate-200">
                                 Изменить
                             </button>
-                            <button @click="deletePlan(p.id)"
-                                    class="bg-red-50 hover:bg-red-600 text-red-600 hover:text-white font-bold px-4 py-2 rounded-xl text-sm transition-all duration-150 active:scale-95">
+                            <button @click="deletePlan(p.id)" class="btn-coral font-bold px-4 py-2.5 rounded-xl text-sm font-bold">
                                 Удалить
                             </button>
                         </div>
-                    </div>
 
-                    <div v-if="plans.length === 0" class="text-center text-slate-400 mt-24 text-lg font-medium">
-                        Учебные планы еще не добавлены. Заполните форму слева.
+                    </div>
+                    <div v-if="plans.length === 0" class="text-center text-slate-400 py-20 font-bold text-lg">
+                        Учебные планы еще не созданы.
                     </div>
                 </div>
             </div>
 
         </div>
+
+        <Transition name="fade">
+            <div v-if="errorMessage" class="fixed bottom-8 right-8 max-w-sm bg-rose-600 text-white p-6 rounded-3xl shadow-2xl z-50 flex items-start gap-4">
+                <div class="flex-1">
+                    <h4 class="font-black text-base tracking-tight mb-1">Ошибка</h4>
+                    <p class="text-sm font-medium text-rose-100 leading-relaxed">{{ errorMessage }}</p>
+                </div>
+                <button @click="errorMessage = ''" class="text-white opacity-70 hover:opacity-100 font-bold text-xl transition-all">✕</button>
+            </div>
+        </Transition>
+
     </div>
 
     <script>
@@ -152,73 +171,57 @@
                 const teachers = ref([]);
                 const plans = ref([]);
 
-                const planForm = ref({
-                    subject_name: '',
-                    total_hours: null,
-                    group_id: null,
-                    teacher_id: null,
-                    teacher2_id: null
-                });
                 const editingPlanId = ref(null);
+                const form = ref({ group_id: null, subject_name: '', total_hours: null, max_weekly_hours: 4, teacher_id: null, teacher2_id: null });
+                const errorMessage = ref('');
 
                 const fetchData = async () => {
-                    const [gRes, sRes, tRes, pRes] = await Promise.all([
-                        fetch('http://localhost:8000/groups/'),
-                        fetch('http://localhost:8000/subjects/'),
-                        fetch('http://localhost:8000/teachers/'),
-                        fetch('http://localhost:8000/course_plans/')
-                    ]);
-                    if (gRes.ok) groups.value = await gRes.json();
-                    if (sRes.ok) subjects.value = await sRes.json();
-                    if (tRes.ok) teachers.value = await tRes.json();
-                    if (pRes.ok) plans.value = await pRes.json();
+                    try {
+                        const [gRes, sRes, tRes, pRes] = await Promise.all([
+                            fetch('http://localhost:8000/groups/'), fetch('http://localhost:8000/subjects/'),
+                            fetch('http://localhost:8000/teachers/'), fetch('http://localhost:8000/course_plans/')
+                        ]);
+                        if (gRes.ok) groups.value = await gRes.json();
+                        if (sRes.ok) subjects.value = await sRes.json();
+                        if (tRes.ok) teachers.value = await tRes.json();
+                        if (pRes.ok) plans.value = await pRes.json();
+                    } catch (e) { errorMessage.value = "Ошибка подключения к серверу API"; }
                 };
 
                 onMounted(fetchData);
 
-                const savePlan = async () => {
-                    const url = editingPlanId.value ? `http://localhost:8000/course_plans/${editingPlanId.value}` : 'http://localhost:8000/course_plans/';
-                    const method = editingPlanId.value ? 'PUT' : 'POST';
+                const getGroupNumber = (id) => groups.value.find(g => g.id === id)?.number || id;
+                const getTeacherName = (id) => teachers.value.find(t => t.id === id)?.name || id;
 
-                    await fetch(url, {
-                        method: method,
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(planForm.value)
-                    });
-                    resetPlanForm();
-                    fetchData();
+                const savePlan = async () => {
+                    errorMessage.value = '';
+                    try {
+                        const url = editingPlanId.value ? `http://localhost:8000/course_plans/${editingPlanId.value}` : 'http://localhost:8000/course_plans/';
+                        const method = editingPlanId.value ? 'PUT' : 'POST';
+
+                        const res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form.value) });
+                        if (res.ok) { resetForm(); await fetchData(); }
+                        else errorMessage.value = (await res.json()).detail || "Ошибка сохранения плана";
+                    } catch (e) { errorMessage.value = "Ошибка связи с сервером"; }
                 };
 
                 const editPlan = (p) => {
                     editingPlanId.value = p.id;
-                    planForm.value = { ...p };
+                    form.value = { ...p };
                 };
 
-                const resetPlanForm = () => {
+                const resetForm = () => {
                     editingPlanId.value = null;
-                    planForm.value = {
-                        subject_name: '',
-                        total_hours: null,
-                        group_id: null,
-                        teacher_id: null,
-                        teacher2_id: null
-                    };
+                    form.value = { group_id: null, subject_name: '', total_hours: null, max_weekly_hours: 4, teacher_id: null, teacher2_id: null };
                 };
 
                 const deletePlan = async (id) => {
-                    if (!confirm('Точно удалить эту связь?')) return;
+                    if (!confirm('Точно удалить этот план?')) return;
                     await fetch(`http://localhost:8000/course_plans/${id}`, { method: 'DELETE' });
                     fetchData();
                 };
 
-                const getGroupNum = (id) => groups.value.find(g => g.id === id)?.number || id;
-                const getTeacherName = (id) => teachers.value.find(t => t.id === id)?.name || id;
-
-                return {
-                    groups, subjects, teachers, plans, planForm, editingPlanId,
-                    savePlan, editPlan, resetPlanForm, deletePlan,
-                    getGroupNum, getTeacherName
-                };
+                return { groups, subjects, teachers, plans, form, editingPlanId, errorMessage, savePlan, editPlan, resetForm, deletePlan, getGroupNumber, getTeacherName };
             }
         }).mount('#app');
     </script>

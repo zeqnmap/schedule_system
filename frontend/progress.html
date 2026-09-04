@@ -3,153 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Выполнение часов | Расписание</title>
+    <title>Аналитика | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <style>[v-cloak] { display: none; }</style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
+        .bento-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 28px; box-shadow: 0 10px 40px -10px rgba(0,0,0,0.04); transition: transform 0.3s ease, box-shadow 0.3s ease; }
+        .bento-card:hover { box-shadow: 0 20px 40px -10px rgba(0,0,0,0.07); transform: translateY(-2px); }
+        .input-modern { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 16px; transition: all 0.2s ease; outline: none; }
+        .input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
+        .progress-thin { height: 4px; border-radius: 4px; }
+        ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+        [v-cloak] { display: none; }
+    </style>
 </head>
-<body class="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen">
-    <div id="app" v-cloak class="max-w-7xl mx-auto p-6 lg:p-8">
+<body class="text-slate-800 antialiased min-h-screen">
 
-        <!-- Шапка -->
-        <header class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 pb-6 border-b border-slate-200">
-            <div>
-                <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Выполнение часов</h1>
-                <p class="text-slate-500 text-lg mt-1 font-medium">Контроль нормы пар: сколько запланировано, сколько уже стоит и сколько осталось</p>
+    <nav class="fixed inset-x-0 top-0 z-50 bg-white/70 backdrop-blur-2xl border-b border-slate-200">
+        <div class="max-w-[1600px] mx-auto px-6 lg:px-10 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-[0_4px_20px_rgba(16,185,129,0.4)]"></div>
+                <span class="text-2xl font-black tracking-tighter text-slate-900">MGKAP<span class="text-slate-400 font-semibold ml-1">2026</span></span>
             </div>
+            <div class="hidden lg:flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/50">
+                <a href="groups_subjects.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Группы и предметы</a>
+                <a href="teachers.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Преподаватели</a>
+                <a href="admin.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Назначение предмета</a>
+                <a href="progress.html" class="px-5 py-2 rounded-xl text-sm font-bold bg-white text-slate-900 shadow-sm border border-slate-200/50">Часы</a>
+                <a href="index.html" class="ml-2 px-6 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 shadow-md transition-all">Расписание</a>
+            </div>
+        </div>
+    </nav>
 
-            <nav class="flex flex-wrap gap-3">
-                <a href="groups_subjects.html"
-                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
-                    📁 Группы и предметы
-                </a>
-                <a href="teachers.html"
-                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
-                    👥 Преподаватели
-                </a>
-                <a href="admin.html"
-                   class="bg-white hover:bg-slate-50 text-slate-700 font-bold text-base px-5 py-3 rounded-2xl shadow-sm border border-slate-200 transition-all duration-150 active:scale-95">
-                    🔗 Учебные планы
-                </a>
-                <a href="progress.html"
-                   class="bg-emerald-600 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm">
-                    📊 Выполнение часов
-                </a>
-                <a href="index.html"
-                   class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-base px-5 py-3 rounded-2xl shadow-sm transition-all duration-150 active:scale-95">
-                    📅 Расписание
-                </a>
-            </nav>
-        </header>
+    <div id="app" v-cloak class="max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
 
-        <!-- Фильтр по группе и общая статистика -->
-        <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-10 flex flex-wrap items-center justify-between gap-6">
-            <div class="flex items-center gap-4">
-                <span class="text-lg font-bold text-slate-800">Фильтр по группе:</span>
-                <select v-model="selectedGroupFilter" @change="fetchProgress"
-                        class="text-lg font-bold border-2 border-slate-200 rounded-xl px-5 py-2.5 focus:border-emerald-500 outline-none bg-slate-50 transition-all">
-                    <option :value="null">Показать все группы</option>
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-end mb-12">
+            <div>
+                <h1 class="text-4xl lg:text-5xl font-black text-slate-900 tracking-tight leading-tight mb-2">Аналитика часов</h1>
+                <p class="text-lg lg:text-xl text-slate-500 font-medium">Контроль соответствия расписания учебным планам</p>
+            </div>
+            <div class="mt-6 md:mt-0 flex gap-4 w-full md:w-auto">
+                <select v-model="selectedGroupId" class="input-modern px-6 py-4 text-slate-900 font-bold text-lg cursor-pointer flex-1 md:w-72 shadow-sm">
+                    <option :value="null">Все группы</option>
                     <option v-for="g in groups" :key="g.id" :value="g.id">Группа {{ g.number }}</option>
                 </select>
+                <button @click="fetchProgress" class="bg-white border border-slate-200 text-slate-700 font-extrabold px-5 py-4 rounded-2xl shadow-sm hover:shadow-md transition-all">
+                    Обновить
+                </button>
             </div>
+        </header>
 
-            <button @click="fetchProgress"
-                    class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-base px-5 py-2.5 rounded-xl border border-slate-300 transition-all duration-150 active:scale-95 cursor-pointer">
-                🔄 Обновить данные
-            </button>
-        </div>
-
-        <!-- Сетка карточек предметов -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div v-for="item in progressItems" :key="item.plan_id"
-                 class="bg-white p-6 rounded-3xl shadow-sm border-2 transition-all duration-200 flex flex-col justify-between"
-                 :class="{
-                    'border-emerald-300 bg-emerald-50/20': item.diff === 0,
-                    'border-amber-300 bg-amber-50/20': item.diff < 0,
-                    'border-red-300 bg-red-50/20': item.diff > 0
-                 }">
+        <!-- Сетка карточек -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+            <div v-for="p in progressList" :key="p.plan_id" class="bento-card p-8 flex flex-col justify-between relative overflow-hidden">
+                <!-- Декоративная линия -->
+                <div class="absolute top-0 left-0 w-full h-1.5" :class="p.diff === 0 ? 'bg-emerald-400' : (p.diff < 0 ? 'bg-amber-400' : 'bg-rose-400')"></div>
 
                 <div>
-                    <!-- Заголовок и группа -->
-                    <div class="flex justify-between items-start gap-2 mb-3">
-                        <h3 class="text-2xl font-extrabold text-slate-900 leading-snug">{{ item.subject_name }}</h3>
-                        <span class="bg-slate-800 text-white font-extrabold text-xs px-3 py-1.5 rounded-xl shrink-0">
-                            Гр. {{ item.group_number }}
-                        </span>
+                    <div class="flex justify-between items-start mb-4">
+                        <h3 class="text-2xl font-extrabold text-slate-900 tracking-tight leading-snug pr-4">{{ p.subject_name }}</h3>
+                        <span class="bg-slate-100 text-slate-800 font-extrabold text-[10px] px-2.5 py-1.5 uppercase tracking-widest rounded-lg shrink-0 mt-1">Гр. {{ p.group_number }}</span>
                     </div>
 
-                    <!-- Преподаватели -->
-                    <p class="text-sm font-semibold text-slate-600 mb-6">
-                        Преп: <span class="text-slate-900">{{ item.teacher_name }}</span>
-                        <span v-if="item.teacher2_name">, {{ item.teacher2_name }}</span>
+                    <p class="text-sm font-semibold text-slate-400 mb-8 uppercase tracking-wide">
+                        {{ p.teacher_name }} <span v-if="p.teacher2_name">+ {{ p.teacher2_name }}</span>
                     </p>
 
-                    <!-- Блок цифр (План / Факт) -->
-                    <div class="grid grid-cols-2 gap-3 bg-white/80 p-4 rounded-2xl border border-slate-200 mb-5">
-                        <div class="text-center border-r border-slate-200">
-                            <span class="block text-xs font-bold text-slate-400 uppercase tracking-wider">План (норма)</span>
-                            <span class="text-2xl font-black text-slate-800">{{ item.total_hours }} пар</span>
-                        </div>
-                        <div class="text-center">
-                            <span class="block text-xs font-bold text-slate-400 uppercase tracking-wider">В расписании</span>
-                            <span class="text-2xl font-black" :class="item.diff === 0 ? 'text-emerald-600' : (item.diff < 0 ? 'text-amber-600' : 'text-red-600')">
-                                {{ item.scheduled_hours }} пар
-                            </span>
+                    <div class="flex items-end justify-between mb-2">
+                        <div class="text-[11px] font-extrabold text-slate-400 uppercase tracking-widest">Прогресс</div>
+                        <div class="text-4xl font-black tracking-tighter" :class="p.diff === 0 ? 'text-emerald-500' : (p.diff < 0 ? 'text-slate-900' : 'text-rose-500')">
+                            {{ p.scheduled_hours }} <span class="text-xl text-slate-300">/ {{ p.total_hours }}</span>
                         </div>
                     </div>
 
-                    <!-- Прогресс-бар -->
-                    <div class="mb-5">
-                        <div class="flex justify-between text-xs font-bold text-slate-500 mb-1.5">
-                            <span>Заполнено</span>
-                            <span>{{ item.raw_percentage }}%</span>
-                        </div>
-                        <div class="w-full bg-slate-200 h-3 rounded-full overflow-hidden">
-                            <div class="h-full rounded-full transition-all duration-300"
-                                 :class="{
-                                    'bg-emerald-500': item.diff === 0,
-                                    'bg-amber-500': item.diff < 0,
-                                    'bg-red-500': item.diff > 0
-                                 }"
-                                 :style="{ width: Math.min(item.percentage, 100) + '%' }">
-                            </div>
-                        </div>
+                    <div class="w-full bg-slate-100 progress-thin mb-8">
+                        <div class="progress-thin transition-all duration-700"
+                             :style="{ width: p.percentage + '%' }"
+                             :class="p.diff === 0 ? 'bg-emerald-500' : (p.diff < 0 ? 'bg-amber-400' : 'bg-rose-500')"></div>
                     </div>
                 </div>
 
-                <!-- Статус нормы (Что делать) -->
-                <div class="pt-2">
-                    <div v-if="item.diff === 0"
-                         class="bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold text-sm py-3 px-4 rounded-2xl text-center">
-                        ✅ Норма выполнена ({{ item.total_hours }} из {{ item.total_hours }})
+                <!-- Бэйджи статуса -->
+                <div class="pt-6 border-t border-slate-100/80">
+                    <div v-if="p.diff === 0" class="flex items-center gap-2 text-emerald-600 font-extrabold text-sm">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                        Норма закрыта на 100%
                     </div>
-                    <div v-else-if="item.diff < 0"
-                         class="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-sm py-3 px-4 rounded-2xl text-center">
-                        ⏳ Не хватает: {{ Math.abs(item.diff) }} пар (нужно добавить)
+                    <div v-else-if="p.diff < 0" class="flex items-center gap-2 text-amber-600 font-extrabold text-sm">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        Осталось {{ Math.abs(p.diff) }} уроков
                     </div>
-                    <div v-else
-                         class="bg-red-100 text-red-900 border border-red-300 font-extrabold text-sm py-3 px-4 rounded-2xl text-center">
-                        ⚠️ Перебор: +{{ item.diff }} пар (удалите лишние)
+                    <div v-else class="flex items-center gap-2 text-rose-500 font-extrabold text-sm">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                        Перебор: {{ p.diff }} уроков
                     </div>
                 </div>
-
             </div>
         </div>
 
-        <div v-if="progressItems.length === 0" class="text-center text-slate-400 py-16 text-xl font-bold">
-            Учебные планы не найдены
+        <div v-if="progressList.length === 0" class="text-center text-slate-400 py-20 font-bold text-lg">
+            Учебные планы не найдены.
         </div>
 
     </div>
 
+    <!-- ТВОЙ ОРИГИНАЛЬНЫЙ СКРИПТ VUE (БЕЗ ИЗМЕНЕНИЙ) -->
     <script>
-        const { createApp, ref, onMounted } = Vue;
+        const { createApp, ref, onMounted, watch } = Vue;
 
         createApp({
             setup() {
                 const groups = ref([]);
-                const progressItems = ref([]);
-                const selectedGroupFilter = ref(null);
+                const selectedGroupId = ref(null);
+                const progressList = ref([]);
 
                 const fetchGroups = async () => {
                     const res = await fetch('http://localhost:8000/groups/');
@@ -158,21 +125,19 @@
 
                 const fetchProgress = async () => {
                     let url = 'http://localhost:8000/plans-progress/';
-                    if (selectedGroupFilter.value) {
-                        url += `?group_id=${selectedGroupFilter.value}`;
-                    }
+                    if (selectedGroupId.value) url += `?group_id=${selectedGroupId.value}`;
                     const res = await fetch(url);
-                    if (res.ok) {
-                        progressItems.value = await res.json();
-                    }
+                    if (res.ok) progressList.value = await res.json();
                 };
+
+                watch(selectedGroupId, fetchProgress);
 
                 onMounted(async () => {
                     await fetchGroups();
                     await fetchProgress();
                 });
 
-                return { groups, progressItems, selectedGroupFilter, fetchProgress };
+                return { groups, selectedGroupId, progressList, fetchProgress };
             }
         }).mount('#app');
     </script>

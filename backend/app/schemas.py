@@ -1,9 +1,11 @@
 from pydantic import BaseModel
 from typing import List, Optional
 
-# --- Схемы для групп ---
 class GroupBase(BaseModel):
     number: int
+    course: int = 1
+    has_saturday: bool = False
+    weekly_hours: int = 30
 
 class GroupCreate(GroupBase):
     pass
@@ -13,7 +15,6 @@ class GroupOut(GroupBase):
     class Config:
         from_attributes = True
 
-# --- Схемы для преподавателей ---
 class TeacherBase(BaseModel):
     name: str
     default_room: str
@@ -30,10 +31,10 @@ class TeacherOut(TeacherBase):
     class Config:
         from_attributes = True
 
-# --- Схемы для учебного плана ---
 class CoursePlanBase(BaseModel):
     subject_name: str
     total_hours: int
+    max_weekly_hours: int = 4  # <-- ВЕРНУЛИ ЛИМИТ ЧАСОВ
     teacher_id: int
     group_id: int
     teacher2_id: Optional[int] = None
@@ -43,10 +44,10 @@ class CoursePlanCreate(CoursePlanBase):
 
 class CoursePlanOut(CoursePlanBase):
     id: int
+    max_weekly_hours: int = 4  # <-- ВЕРНУЛИ ЛИМИТ ЧАСОВ
     class Config:
         from_attributes = True
 
-# --- Схемы для расписания ---
 class ScheduleEntryBase(BaseModel):
     week_number: int
     day_of_week: int
@@ -73,10 +74,9 @@ class ScheduleEntryUpdate(BaseModel):
     teacher_id: int
     teacher2_id: Optional[int] = None
     group_id: int
-
+    subject_name: str
     class Config:
         from_attributes = True
-
 
 class ArchivedWeekToggle(BaseModel):
     group_id: int
@@ -86,7 +86,6 @@ class ArchivedWeekOut(BaseModel):
     group_id: int
     week_number: int
     is_archived: bool
-
     class Config:
         from_attributes = True
 
