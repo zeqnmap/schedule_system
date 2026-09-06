@@ -1,101 +1,175 @@
 from pydantic import BaseModel
 from typing import List, Optional
 
+
+class RoomBase(BaseModel):
+    name: str
+
+
+class RoomCreate(RoomBase):
+    pass
+
+
+class RoomOut(RoomBase):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
 class GroupBase(BaseModel):
     number: int
     course: int = 1
     has_saturday: bool = False
     weekly_hours: int = 30
+    semester_weeks: int = 20
+
 
 class GroupCreate(GroupBase):
     pass
 
+
 class GroupOut(GroupBase):
     id: int
+    number: int
+    course: int
+    has_saturday: bool
+    weekly_hours: int
+    semester_weeks: int
+
     class Config:
         from_attributes = True
 
+
 class TeacherBase(BaseModel):
     name: str
-    default_room: str
+    room_id: Optional[int] = None
     max_hours_per_week: int = 30
     is_active: bool = True
     on_vacation: bool = False
     is_sick: bool = False
 
+
 class TeacherCreate(TeacherBase):
     pass
 
+
 class TeacherOut(TeacherBase):
     id: int
+    name: str
+    room_id: Optional[int] = None
+    max_hours_per_week: int
+    is_active: bool
+    on_vacation: bool
+    is_sick: bool
+    # Добавлено поле для удобства (будет заполняться на уровне БД/роута)
+    room_name: Optional[str] = None
+
     class Config:
         from_attributes = True
+
 
 class CoursePlanBase(BaseModel):
     subject_name: str
     total_hours: int
-    max_weekly_hours: int = 4  # <-- ВЕРНУЛИ ЛИМИТ ЧАСОВ
+    max_weekly_hours: int = 4
     teacher_id: int
     group_id: int
     teacher2_id: Optional[int] = None
 
+
 class CoursePlanCreate(CoursePlanBase):
     pass
 
+
 class CoursePlanOut(CoursePlanBase):
     id: int
-    max_weekly_hours: int = 4  # <-- ВЕРНУЛИ ЛИМИТ ЧАСОВ
+    subject_name: str
+    total_hours: int
+    max_weekly_hours: int
+    teacher_id: int
+    group_id: int
+    teacher2_id: Optional[int] = None
+
     class Config:
         from_attributes = True
+
 
 class ScheduleEntryBase(BaseModel):
     week_number: int
     day_of_week: int
     time_slot: int
-    room: str
+    room_name: str
     teacher_id: int
     teacher2_id: Optional[int] = None
     group_id: int
     subject_name: str
 
+
 class ScheduleEntryCreate(ScheduleEntryBase):
     pass
 
+
 class ScheduleEntryOut(ScheduleEntryBase):
     id: int
+    week_number: int
+    day_of_week: int
+    time_slot: int
+    room_name: str
+    teacher_id: int
+    teacher2_id: Optional[int] = None
+    group_id: int
+    subject_name: str
+
     class Config:
         from_attributes = True
+
 
 class ScheduleEntryUpdate(BaseModel):
     week_number: int
     day_of_week: int
     time_slot: int
-    room: str
+    room_name: str
     teacher_id: int
     teacher2_id: Optional[int] = None
     group_id: int
     subject_name: str
+
     class Config:
         from_attributes = True
+
 
 class ArchivedWeekToggle(BaseModel):
     group_id: int
     week_number: int
 
+
 class ArchivedWeekOut(BaseModel):
     group_id: int
     week_number: int
     is_archived: bool
+
     class Config:
         from_attributes = True
+
 
 class SubjectBase(BaseModel):
     name: str
 
+
 class SubjectCreate(SubjectBase):
     pass
 
+
 class SubjectOut(SubjectBase):
     id: int
+    name: str
+
     class Config:
         from_attributes = True
+
+
+class GenerateResponse(BaseModel):
+    status: str
+    message: str

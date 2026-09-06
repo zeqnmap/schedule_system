@@ -14,13 +14,16 @@
         .input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
         .btn-emerald { background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; box-shadow: 0 8px 24px -6px rgba(16, 185, 129, 0.4); transition: all 0.2s ease; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
         .btn-emerald:hover { box-shadow: 0 12px 32px -6px rgba(16, 185, 129, 0.5); transform: translateY(-2px); }
-        .slot-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 24px; transition: all 0.2s ease; cursor: pointer; position: relative; overflow: hidden; }
+        .slot-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 24px; transition: all 0.2s ease; cursor: pointer; position: relative; overflow: hidden; width: 100%; }
         .slot-card:hover { border-color: #10B981; box-shadow: 0 12px 30px -8px rgba(16, 185, 129, 0.2); transform: translateY(-3px); }
-        .slot-empty { background-color: rgba(248, 250, 252, 0.6); border: 2px dashed #E2E8F0; border-radius: 24px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; position: relative; }
-        .slot-empty:hover { border-color: #CBD5E1; background-color: #FFFFFF; }
+        .slot-empty { background-color: rgba(248, 250, 252, 0.6); border: 2px dashed #E2E8F0; border-radius: 24px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; cursor: pointer; }
+        .slot-empty:hover { border-color: #10B981; background-color: #ECFDF5; }
         .modal-glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
         .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
         .fade-enter-from, .fade-leave-to { opacity: 0; }
+        /* Анимация спиннера */
+        .spinner { border: 4px solid rgba(255,255,255,0.3); width: 40px; height: 40px; border-radius: 50%; border-left-color: #fff; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         [v-cloak] { display: none; }
     </style>
 </head>
@@ -44,18 +47,24 @@
 
     <div id="app" v-cloak class="max-w-[1800px] mx-auto px-6 lg:px-10 pt-32 pb-16">
 
+        <!-- ЛОАДЕР ГЕНЕРАЦИИ -->
+        <Transition name="fade">
+            <div v-if="isGenerating" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[200] flex flex-col items-center justify-center text-white">
+                <div class="spinner mb-6"></div>
+                <h2 class="text-3xl font-black mb-2">Глобальная генерация расписания...</h2>
+                <p class="text-slate-300 font-medium text-lg">Пожалуйста, подождите. Алгоритм сводит 20+ групп (макс. 60 секунд).</p>
+            </div>
+        </Transition>
+
         <header class="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-10">
             <div>
                 <h1 class="text-4xl lg:text-5xl font-black text-slate-900 tracking-tight leading-tight mb-2">Сетка расписания</h1>
                 <p class="text-lg lg:text-xl text-slate-500 font-medium">Точное соблюдение нормы часов группы на каждой неделе</p>
             </div>
             <div class="flex gap-3 mt-6 lg:mt-0">
-                <button @click="generateScheduleAll" class="bg-white border border-slate-200 text-slate-700 font-extrabold text-sm px-6 py-4 rounded-2xl shadow-sm hover:shadow-md transition-all">
-                    Обновить все
-                </button>
-                <button @click="generateScheduleForCurrentGroup" class="btn-emerald font-extrabold text-base px-8 py-4 rounded-2xl flex items-center gap-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    <span>Сгенерировать Гр. {{ currentGroupNumber }}</span>
+                <button @click="generateScheduleAll" class="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-base px-8 py-4 rounded-2xl flex items-center gap-3 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.5)] transition-all">
+                    <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+                    <span>Сгенерировать ВСЕМ (Неделя {{ selectedWeek }})</span>
                 </button>
             </div>
         </header>
@@ -68,29 +77,19 @@
                         <option v-for="group in groups" :key="group.id" :value="group.id">Группа {{ group.number }}</option>
                     </select>
                 </div>
-
                 <div class="flex items-center gap-3">
                     <select v-model.number="selectedWeek" class="input-modern px-5 py-3 text-slate-900 font-black text-lg w-40 cursor-pointer">
-                        <option v-for="w in 20" :key="w" :value="w">Неделя {{ w }}</option>
+                        <option v-for="w in currentGroupSemesterWeeks" :key="w" :value="w">Неделя {{ w }}</option>
                     </select>
                 </div>
-
-                <!-- ОБНОВЛЕННАЯ КНОПКА С ФАКТИЧЕСКИМИ ЧАСАМИ -->
-                <button @click="changeWeeklyHoursPrompt" title="Нажмите, чтобы изменить жесткую норму часов"
-                        class="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-extrabold text-sm transition-all flex items-center gap-2">
+                <button @click="changeWeeklyHoursPrompt" title="Нажмите, чтобы изменить жесткую норму часов" class="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-extrabold text-sm transition-all flex items-center gap-2">
                     ⏱️ Учится: <span :class="currentWeekActualHours > currentGroupWeeklyHours ? 'text-rose-600' : 'text-emerald-600'">{{ currentWeekActualHours }}</span> / {{ currentGroupWeeklyHours }} ч.
                 </button>
-
-                <button @click="toggleSaturdayForGroup"
-                        :class="currentGroupHasSaturday ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'"
-                        class="px-5 py-3.5 rounded-2xl font-extrabold text-sm border transition-all flex items-center gap-2">
+                <button @click="toggleSaturdayForGroup" :class="currentGroupHasSaturday ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'" class="px-5 py-3.5 rounded-2xl font-extrabold text-sm border transition-all flex items-center gap-2">
                     {{ currentGroupHasSaturday ? '📅 6 дней (суббота вкл)' : '☕ 5 дней (без субботы)' }}
                 </button>
             </div>
-
-            <button @click="toggleArchive"
-                    :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'"
-                    class="px-6 py-3.5 rounded-2xl font-extrabold text-sm border transition-all w-full xl:w-auto">
+            <button @click="toggleArchive" :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'" class="px-6 py-3.5 rounded-2xl font-extrabold text-sm border transition-all w-full xl:w-auto">
                 {{ isArchived ? '🔒 Разблокировать неделю' : '📦 Заархивировать' }}
             </button>
         </div>
@@ -99,64 +98,55 @@
             🔒 Эта неделя заархивирована. Любые изменения и перезапись заблокированы.
         </div>
 
-        <!-- СЕТКА РАСПИСАНИЯ -->
         <div class="grid gap-6" :class="showSaturday ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'">
             <div v-for="day in (showSaturday ? 6 : 5)" :key="day" class="flex flex-col gap-4">
                 <h2 class="text-center font-black text-slate-400 uppercase tracking-widest text-[11px] mb-1" :class="day === 6 ? 'text-indigo-400' : ''">
                     {{ getDayName(day) }}
                 </h2>
 
-                <div v-for="slot in 6" :key="slot" class="min-h-[130px] group relative">
-
-                    <div v-if="getEntry(day, slot)" @click="openEditModal(getEntry(day, slot))"
-                         class="slot-card h-full p-5 flex flex-col justify-center" :class="isArchived ? 'opacity-80 cursor-not-allowed' : ''">
+                <div v-for="slot in 12" :key="slot" class="group relative flex h-[130px]">
+                    <div v-if="getEntry(day, slot)" @click="openEditModal(getEntry(day, slot))" class="slot-card h-full w-full p-4 flex flex-col" :class="isArchived ? 'opacity-80 cursor-not-allowed' : ''">
                         <div class="absolute top-0 left-0 w-1.5 h-full bg-emerald-400"></div>
-                        <span class="text-[10px] font-extrabold text-slate-300 absolute top-4 right-4">{{ slot }} урок</span>
-
-                        <div class="font-black text-slate-900 text-base leading-snug pr-8 mb-4">{{ getEntry(day, slot).subject_name }}</div>
-
-                        <div class="flex justify-between items-end mt-auto">
-                            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+                        <div class="flex justify-between items-start mb-1">
+                            <div></div><span class="text-[10px] font-extrabold text-slate-300">{{ slot }} урок</span>
+                        </div>
+                        <div class="font-black text-slate-900 text-sm leading-snug line-clamp-2 mb-auto" :title="getEntry(day, slot).subject_name">
+                            {{ getEntry(day, slot).subject_name }}
+                        </div>
+                        <div class="flex justify-between items-end mt-2">
+                            <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wide truncate pr-2" :title="getTeacherName(getEntry(day, slot).teacher_id)">
                                 {{ getTeacherName(getEntry(day, slot).teacher_id) }}
                             </span>
-                            <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded-md text-[10px] font-black tracking-widest">КАБ {{ getEntry(day, slot).room }}</span>
+                            <!-- Показываем название кабинета вместо старого поля -->
+                            <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded-md text-[10px] font-black tracking-widest shrink-0">КАБ {{ getEntry(day, slot).room_name }}</span>
                         </div>
                     </div>
 
-                    <div v-else class="slot-empty h-full">
-                        <span class="text-[10px] font-extrabold text-slate-300 absolute top-4 left-4">{{ slot }} урок</span>
-                        <button v-if="!isArchived" @click="openCreateModal(day, slot)"
-                                class="text-xs bg-slate-900 text-white font-bold py-2 px-4 rounded-xl opacity-0 group-hover:opacity-100 transition-all transform scale-95 group-hover:scale-100 shadow-md">
-                            Добавить
-                        </button>
+                    <div v-else @click="!isArchived && openCreateModal(day, slot)" class="slot-empty h-full w-full">
+                        <span class="text-[10px] font-extrabold text-slate-300 absolute top-3 left-4">{{ slot }} урок</span>
+                        <span v-if="!isArchived" class="text-emerald-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity bg-emerald-50 px-4 py-2 rounded-xl text-sm shadow-sm">➕ Добавить</span>
                     </div>
-
                 </div>
             </div>
         </div>
 
-        <!-- МОДАЛЬНОЕ ОКНО -->
+        <!-- МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ УРОКА -->
         <Transition name="fade">
-            <div v-if="modalMode" class="fixed inset-0 modal-glass flex items-center justify-center z-50 p-6">
+            <div v-if="modalMode" class="fixed inset-0 modal-glass flex items-center justify-center z-[100] p-6">
                 <div class="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
                     <div class="p-8 border-b border-slate-100 flex justify-between items-center">
-                        <h3 class="text-2xl font-black text-slate-900 tracking-tight">
-                            {{ modalMode === 'edit' ? 'Редактировать урок' : 'Новый урок' }}
-                        </h3>
+                        <h3 class="text-2xl font-black text-slate-900 tracking-tight">{{ modalMode === 'edit' ? 'Редактировать урок' : 'Новый урок' }}</h3>
                         <button @click="modalMode = null" class="text-slate-400 hover:text-slate-900 text-xl font-bold transition-colors">✕</button>
                     </div>
 
                     <div class="p-8 space-y-5 bg-slate-50/50">
                         <div>
                             <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Предмет (из плана группы)</label>
-                            <select v-model="selectedPlanId" @change="onPlanChange" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
+                            <select v-model.number="selectedPlanId" @change="onPlanChange" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
                                 <option :value="null">--- Выберите предмет ---</option>
-                                <option v-for="p in groupPlans" :key="p.id" :value="p.id">
-                                    {{ p.subject_name }} ({{ getTeacherName(p.teacher_id) }})
-                                </option>
+                                <option v-for="p in groupPlans" :key="p.id" :value="p.id">{{ p.subject_name }} ({{ getTeacherName(p.teacher_id) }})</option>
                             </select>
                         </div>
-
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">День недели</label>
@@ -167,20 +157,14 @@
                             <div>
                                 <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Номер урока</label>
                                 <select v-model.number="form.time_slot" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
-                                    <option v-for="s in 6" :value="s">{{ s }} урок</option>
+                                    <option v-for="s in 12" :value="s">{{ s }} урок</option>
                                 </select>
                             </div>
                         </div>
-
-                        <div>
-                            <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет</label>
-                            <input v-model="form.room" type="text" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base">
-                        </div>
-
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Преподаватель 1</label>
-                                <select v-model.number="form.teacher_id" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
+                                <select v-model.number="form.teacher_id" @change="updateRoomFromTeacher" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
                                     <option v-for="t in teachers" :value="t.id">{{ t.name }}</option>
                                 </select>
                             </div>
@@ -192,14 +176,17 @@
                                 </select>
                             </div>
                         </div>
+                        <div>
+                            <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет (определяется по преподавателю)</label>
+                            <div class="bg-slate-100/50 border border-slate-200 px-5 py-4 rounded-xl text-slate-500 font-bold text-base cursor-not-allowed">
+                                Каб. {{ form.room_name || 'Не назначен' }}
+                            </div>
+                        </div>
                     </div>
 
                     <div class="p-8 border-t border-slate-100 flex justify-between items-center bg-white">
-                        <button v-if="modalMode === 'edit'" @click="deleteEntry" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold py-3 px-5 rounded-2xl text-sm transition-colors">
-                            Удалить
-                        </button>
+                        <button v-if="modalMode === 'edit'" @click="deleteEntry" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold py-3 px-5 rounded-2xl text-sm transition-colors">Удалить</button>
                         <div v-else></div>
-
                         <div class="flex gap-3">
                             <button @click="modalMode = null" class="px-6 py-3 text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-bold rounded-2xl transition-all">Отмена</button>
                             <button @click="saveEntry" class="btn-emerald font-extrabold py-3 px-8 rounded-2xl text-base">Сохранить</button>
@@ -209,11 +196,12 @@
             </div>
         </Transition>
 
+        <!-- АЛЕРТЫ С ОШИБКАМИ -->
         <Transition name="fade">
-            <div v-if="errorMessage" class="fixed bottom-8 right-8 max-w-sm bg-rose-600 text-white p-6 rounded-3xl shadow-2xl z-50 flex items-start gap-4">
+            <div v-if="errorMessage" class="fixed bottom-8 right-8 max-w-lg bg-rose-600 text-white p-6 rounded-3xl shadow-2xl z-[110] flex items-start gap-4">
                 <div class="flex-1">
-                    <h4 class="font-black text-base tracking-tight mb-1">Ошибка</h4>
-                    <p class="text-sm font-medium text-rose-100 leading-relaxed">{{ errorMessage }}</p>
+                    <h4 class="font-black text-base tracking-tight mb-1">Ошибка генерации</h4>
+                    <p class="text-sm font-medium text-rose-100 leading-relaxed whitespace-pre-wrap">{{ errorMessage }}</p>
                 </div>
                 <button @click="errorMessage = ''" class="text-white opacity-70 hover:opacity-100 font-bold text-xl transition-all">✕</button>
             </div>
@@ -233,6 +221,7 @@
                 const selectedGroupId = ref(null);
                 const selectedWeek = ref(1);
                 const isArchived = ref(false);
+                const isGenerating = ref(false); // Состояние лоадера генерации
 
                 const modalMode = ref(null);
                 const form = ref({});
@@ -243,36 +232,17 @@
                 const currentGroupNumber = computed(() => currentGroup.value ? currentGroup.value.number : '');
                 const currentGroupHasSaturday = computed(() => currentGroup.value ? Boolean(currentGroup.value.has_saturday) : false);
                 const currentGroupWeeklyHours = computed(() => currentGroup.value ? (currentGroup.value.weekly_hours || 30) : 30);
+                const currentGroupSemesterWeeks = computed(() => currentGroup.value ? (currentGroup.value.semester_weeks || 20) : 20);
 
-                // СЧЕТЧИК ФАКТИЧЕСКИХ ЧАСОВ (КАЖДЫЙ ЭЛЕМЕНТ SCHEDULE - ЭТО 1 УРОК 45 МИН)
-                const currentWeekActualHours = computed(() => {
-                    return schedule.value.length;
-                });
-
-                const showSaturday = computed(() => {
-                    return currentGroupHasSaturday.value || schedule.value.some(e => e.day_of_week === 6);
-                });
-
+                const currentWeekActualHours = computed(() => schedule.value.length);
+                const showSaturday = computed(() => currentGroupHasSaturday.value || schedule.value.some(e => e.day_of_week === 6));
                 const groupPlans = computed(() => plans.value.filter(p => Number(p.group_id) === Number(selectedGroupId.value)));
 
                 const fetchData = async () => {
-                    try {
-                        const [gRes, tRes, pRes] = await Promise.all([
-                            fetch('http://localhost:8000/groups/'),
-                            fetch('http://localhost:8000/teachers/'),
-                            fetch('http://localhost:8000/course_plans/')
-                        ]);
-                        if (gRes.ok) {
-                            groups.value = await gRes.json();
-                            if (groups.value.length > 0 && !selectedGroupId.value) {
-                                selectedGroupId.value = groups.value[0].id;
-                            }
-                        }
-                        if (tRes.ok) teachers.value = await tRes.json();
-                        if (pRes.ok) plans.value = await pRes.json();
-                    } catch (e) {
-                        errorMessage.value = "Ошибка подключения к серверу";
-                    }
+                    const [gRes, tRes, pRes] = await Promise.all([ fetch('http://localhost:8000/groups/'), fetch('http://localhost:8000/teachers/'), fetch('http://localhost:8000/course_plans/') ]);
+                    if (gRes.ok) { groups.value = await gRes.json(); if (groups.value.length > 0 && !selectedGroupId.value) { selectedGroupId.value = groups.value[0].id; } }
+                    if (tRes.ok) teachers.value = await tRes.json();
+                    if (pRes.ok) plans.value = await pRes.json();
                 };
 
                 const fetchSchedule = async () => {
@@ -284,80 +254,45 @@
                 const fetchArchiveStatus = async () => {
                     if (!selectedGroupId.value) return;
                     const res = await fetch(`http://localhost:8000/archived-weeks/status?group_id=${selectedGroupId.value}&week_number=${selectedWeek.value}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        isArchived.value = data.is_archived;
-                    }
+                    if (res.ok) isArchived.value = (await res.json()).is_archived;
                 };
 
                 const changeWeeklyHoursPrompt = async () => {
-                    if (!selectedGroupId.value) return;
-                    const currentVal = currentGroupWeeklyHours.value;
-                    const input = prompt(`Введите норму часов в неделю для Группы ${currentGroupNumber.value}:`, currentVal);
+                    const input = prompt(`Введите норму часов в неделю для Группы ${currentGroupNumber.value}:`, currentGroupWeeklyHours.value);
                     if (input === null) return;
                     const parsed = parseInt(input, 10);
-                    if (isNaN(parsed) || parsed < 2) {
-                        alert("Пожалуйста, введите положительное число часов.");
-                        return;
-                    }
-
-                    try {
-                        const res = await fetch(`http://localhost:8000/groups/${selectedGroupId.value}/set-weekly-hours`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ weekly_hours: parsed })
-                        });
-                        if (res.ok) {
-                            const data = await res.json();
-                            if (currentGroup.value) currentGroup.value.weekly_hours = data.weekly_hours;
-                            alert(`Норма для Группы ${currentGroupNumber.value} успешно изменена на ${data.weekly_hours} ч/нед.`);
-                        }
-                    } catch (e) {
-                        alert("Ошибка связи с сервером");
+                    if (!isNaN(parsed) && parsed >= 2) {
+                        const res = await fetch(`http://localhost:8000/groups/${selectedGroupId.value}/set-weekly-hours`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weekly_hours: parsed }) });
+                        if (res.ok) currentGroup.value.weekly_hours = (await res.json()).weekly_hours;
                     }
                 };
 
                 const toggleSaturdayForGroup = async () => {
-                    if (!selectedGroupId.value) return;
-                    try {
-                        const res = await fetch(`http://localhost:8000/groups/${selectedGroupId.value}/toggle-saturday`, { method: 'POST' });
-                        if (res.ok) {
-                            const data = await res.json();
-                            if (currentGroup.value) currentGroup.value.has_saturday = data.has_saturday;
-                            await fetchSchedule();
-                        }
-                    } catch (e) {
-                        alert("Ошибка переключения субботы");
-                    }
+                    const res = await fetch(`http://localhost:8000/groups/${selectedGroupId.value}/toggle-saturday`, { method: 'POST' });
+                    if (res.ok) { currentGroup.value.has_saturday = (await res.json()).has_saturday; await fetchSchedule(); }
                 };
 
                 const toggleArchive = async () => {
-                    if (!selectedGroupId.value) return;
-                    const res = await fetch('http://localhost:8000/archived-weeks/toggle', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ group_id: selectedGroupId.value, week_number: selectedWeek.value })
-                    });
-                    if (res.ok) {
-                        const data = await res.json();
-                        isArchived.value = data.is_archived;
-                    }
+                    const res = await fetch('http://localhost:8000/archived-weeks/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selectedGroupId.value, week_number: selectedWeek.value }) });
+                    if (res.ok) isArchived.value = (await res.json()).is_archived;
                 };
 
-                watch([selectedGroupId, selectedWeek], () => {
-                    fetchSchedule();
-                    fetchArchiveStatus();
+                watch(selectedGroupId, () => {
+                    if (selectedWeek.value > currentGroupSemesterWeeks.value) selectedWeek.value = currentGroupSemesterWeeks.value;
+                    else { fetchSchedule(); fetchArchiveStatus(); }
                 });
-
-                onMounted(async () => {
-                    await fetchData();
-                    await fetchSchedule();
-                    await fetchArchiveStatus();
-                });
+                watch(selectedWeek, () => { fetchSchedule(); fetchArchiveStatus(); });
+                onMounted(async () => { await fetchData(); await fetchSchedule(); await fetchArchiveStatus(); });
 
                 const getDayName = (dayNum) => ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"][dayNum - 1];
                 const getTeacherName = (id) => teachers.value.find(t => t.id === id)?.name || `Преп. ${id}`;
                 const getEntry = (day, slot) => schedule.value.find(e => e.day_of_week === day && e.time_slot === slot);
+
+                // АВТОМАТИЧЕСКАЯ ПОДСТАНОВКА КАБИНЕТА
+                const updateRoomFromTeacher = () => {
+                    const teacher = teachers.value.find(t => t.id === form.value.teacher_id);
+                    if (teacher) { form.value.room_name = teacher.room_name || 'Не назначен'; }
+                };
 
                 const onPlanChange = () => {
                     const plan = plans.value.find(p => p.id === selectedPlanId.value);
@@ -365,82 +300,63 @@
                         form.value.subject_name = plan.subject_name;
                         form.value.teacher_id = plan.teacher_id;
                         form.value.teacher2_id = plan.teacher2_id;
-                        const teacher = teachers.value.find(t => t.id === plan.teacher_id);
-                        if (teacher) form.value.room = teacher.default_room;
+                        updateRoomFromTeacher();
                     }
                 };
 
                 const openEditModal = (entry) => {
                     if (isArchived.value) return;
-                    modalMode.value = 'edit';
-                    form.value = { ...entry };
+                    modalMode.value = 'edit'; form.value = { ...entry };
                     const matchedPlan = plans.value.find(p => p.group_id === entry.group_id && p.subject_name === entry.subject_name);
                     selectedPlanId.value = matchedPlan ? matchedPlan.id : null;
-                    errorMessage.value = '';
                 };
 
                 const openCreateModal = (day, slot) => {
                     if (isArchived.value) return;
-                    modalMode.value = 'create';
-                    selectedPlanId.value = null;
+                    modalMode.value = 'create'; selectedPlanId.value = null;
+                    const defaultTeacher = teachers.value[0];
                     form.value = {
                         week_number: selectedWeek.value, day_of_week: day, time_slot: slot,
-                        room: teachers.value[0]?.default_room || '101', teacher_id: teachers.value[0]?.id || null,
-                        teacher2_id: null, group_id: Number(selectedGroupId.value), subject_name: ''
+                        teacher_id: defaultTeacher ? defaultTeacher.id : null, teacher2_id: null,
+                        group_id: Number(selectedGroupId.value), subject_name: '',
+                        room_name: defaultTeacher ? (defaultTeacher.room_name || 'Не назначен') : 'Не назначен'
                     };
-                    errorMessage.value = '';
                 };
 
                 const saveEntry = async () => {
-                    try {
-                        let url = 'http://localhost:8000/schedule/';
-                        let method = 'POST';
-                        if (modalMode.value === 'edit') { url = `http://localhost:8000/schedule/${form.value.id}`; method = 'PUT'; }
-
-                        const response = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form.value) });
-                        if (!response.ok) { errorMessage.value = (await response.json()).detail || "Ошибка сохранения"; return; }
-                        await fetchSchedule();
-                        modalMode.value = null;
-                    } catch (e) { errorMessage.value = 'Ошибка сервера'; }
+                    const url = modalMode.value === 'edit' ? `http://localhost:8000/schedule/${form.value.id}` : 'http://localhost:8000/schedule/';
+                    const method = modalMode.value === 'edit' ? 'PUT' : 'POST';
+                    await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form.value) });
+                    await fetchSchedule(); modalMode.value = null;
                 };
 
                 const deleteEntry = async () => {
                     if (!confirm('Точно удалить этот урок?')) return;
-                    try {
-                        const response = await fetch(`http://localhost:8000/schedule/${form.value.id}`, { method: 'DELETE' });
-                        if (!response.ok) { errorMessage.value = "Ошибка удаления"; return; }
-                        await fetchSchedule();
-                        modalMode.value = null;
-                    } catch (e) { errorMessage.value = 'Ошибка сервера'; }
+                    await fetch(`http://localhost:8000/schedule/${form.value.id}`, { method: 'DELETE' });
+                    await fetchSchedule(); modalMode.value = null;
                 };
 
-                const generateScheduleForCurrentGroup = async () => {
-                    if (!selectedGroupId.value) return;
-                    if (isArchived.value) { alert("Неделя заархивирована."); return; }
-                    try {
-                        const res = await fetch(`http://localhost:8000/generate_schedule/?group_id=${selectedGroupId.value}`, { method: 'POST' });
-                        if (res.ok) { await fetchSchedule(); alert(`Сгенерировано!`); }
-                        else errorMessage.value = (await res.json()).detail || "Ошибка генерации";
-                    } catch (e) { errorMessage.value = "Ошибка связи"; }
-                };
-
+                // ГЛОБАЛЬНАЯ ГЕНЕРАЦИЯ (Вызываем для всех групп сразу!)
                 const generateScheduleAll = async () => {
-                    if (!confirm('Сгенерировать для ВСЕХ групп?')) return;
+                    if (!confirm(`Запустить синхронную генерацию для ВСЕХ групп на ${selectedWeek.value} неделю?\nЭто может занять до 60 секунд.`)) return;
+
+                    isGenerating.value = true;
+                    errorMessage.value = '';
+
                     try {
-                        const res = await fetch('http://localhost:8000/generate_schedule/', { method: 'POST' });
-                        if (res.ok) { await fetchSchedule(); alert('Сгенерировано для всех!'); }
-                        else errorMessage.value = (await res.json()).detail || "Ошибка генерации";
-                    } catch (e) { errorMessage.value = "Ошибка связи"; }
+                        const res = await fetch(`http://localhost:8000/generate_schedule/?week_number=${selectedWeek.value}`, { method: 'POST' });
+                        if (res.ok) {
+                            await fetchSchedule();
+                        } else {
+                            const errData = await res.json();
+                            errorMessage.value = errData.detail || "Неизвестная ошибка сервера";
+                        }
+                    } catch (e) { errorMessage.value = "Ошибка связи с сервером. Возможно, превышен лимит времени (Timeout)."; }
+
+                    isGenerating.value = false;
                 };
 
-                return {
-                    groups, teachers, plans, schedule, selectedGroupId, selectedWeek, isArchived,
-                    modalMode, form, selectedPlanId, groupPlans, errorMessage, getDayName, getTeacherName, getEntry,
-                    onPlanChange, openEditModal, openCreateModal, saveEntry, deleteEntry, toggleArchive,
-                    currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, showSaturday,
-                    toggleSaturdayForGroup, changeWeeklyHoursPrompt,
-                    generateScheduleForCurrentGroup, generateScheduleAll
-                };
+                return { groups, teachers, plans, schedule, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, getDayName, getTeacherName, getEntry, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll };
             }
         }).mount('#app');
     </script>

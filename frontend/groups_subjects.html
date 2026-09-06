@@ -30,12 +30,12 @@
         <div class="max-w-[1600px] mx-auto px-6 lg:px-10 h-20 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="w-9 h-9 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-[0_4px_20px_rgba(16,185,129,0.4)]"></div>
-                <span class="text-2xl font-black tracking-tighter text-slate-900">MGKAP<span class="text-slate-400 font-semibold ml-1">2026</span></span>
+                <span class="text-2xl font-black tracking-tighter text-slate-900">EduSync<span class="text-slate-400 font-semibold ml-1">2026</span></span>
             </div>
             <div class="hidden lg:flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/50">
-                <a href="groups_subjects.html" class="px-5 py-2 rounded-xl text-sm font-bold bg-white text-slate-900 shadow-sm border border-slate-200/50">Группы и предметы</a>
+                <a href="groups_subjects.html" class="px-5 py-2 rounded-xl text-sm font-bold bg-white text-slate-900 shadow-sm border border-slate-200/50">Справочники</a>
                 <a href="teachers.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Преподаватели</a>
-                <a href="admin.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Назначение предмета</a>
+                <a href="admin.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Учебные планы</a>
                 <a href="progress.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Часы</a>
                 <a href="index.html" class="ml-2 px-6 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 shadow-md transition-all">Расписание</a>
             </div>
@@ -51,7 +51,6 @@
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
-            <!-- КОЛОНКА 1: ГРУППЫ -->
             <div class="bento-card p-8 lg:p-10 flex flex-col">
                 <div class="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
                     <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Учебные группы</h2>
@@ -59,11 +58,26 @@
                 </div>
 
                 <form @submit.prevent="saveGroup" class="mb-10 space-y-5">
-                    <div>
-                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Номер группы</label>
-                        <input v-model.number="newGroup.number" type="number" required placeholder="Напр. 451"
-                               class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Группа</label>
+                            <input v-model.number="newGroup.number" type="number" required placeholder="Напр. 451" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Курс</label>
+                            <select v-model.number="newGroup.course" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg cursor-pointer">
+                                <option value="1">1 курс</option>
+                                <option value="2">2 курс</option>
+                                <option value="3">3 курс</option>
+                                <option value="4">4 курс</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Недель в сем.</label>
+                            <input v-model.number="newGroup.semester_weeks" type="number" required placeholder="Напр. 17" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg text-center">
+                        </div>
                     </div>
+
                     <div class="flex gap-3 pt-2">
                         <button type="submit" class="flex-1 btn-emerald font-extrabold text-base py-4 rounded-2xl">
                             {{ editingGroupId ? 'Сохранить изменения' : 'Добавить группу' }}
@@ -77,7 +91,11 @@
                 <div class="space-y-4 overflow-y-auto max-h-[600px] pr-3">
                     <div v-for="g in groups" :key="g.id" class="group flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 hover:shadow-md transition-all">
                         <div>
-                            <h3 class="font-black text-2xl text-slate-900 tracking-tight mb-1">Группа {{ g.number }}</h3>
+                            <div class="flex items-center gap-3 mb-1.5">
+                                <h3 class="font-black text-2xl text-slate-900 tracking-tight">Группа {{ g.number }}</h3>
+                                <span class="bg-slate-100 text-slate-700 font-extrabold text-[10px] px-2.5 py-1 rounded-lg uppercase tracking-widest">{{ g.course }} курс</span>
+                                <span class="bg-emerald-50 text-emerald-700 font-extrabold text-[10px] px-2.5 py-1 rounded-lg uppercase tracking-widest">{{ g.semester_weeks }} нед.</span>
+                            </div>
                             <div class="text-xs font-bold" :class="g.has_saturday ? 'text-indigo-500' : 'text-slate-400'">
                                 {{ g.has_saturday ? '📅 6 дней (с субботой)' : '☕ 5 дней (без субботы)' }}
                             </div>
@@ -90,11 +108,9 @@
                             <button @click="deleteGroup(g.id)" class="btn-coral font-bold px-4 py-2.5 rounded-xl text-xs">Удалить</button>
                         </div>
                     </div>
-                    <div v-if="groups.length === 0" class="text-center text-slate-400 py-12 font-bold text-lg">Список пуст.</div>
                 </div>
             </div>
 
-            <!-- КОЛОНКА 2: ПРЕДМЕТЫ -->
             <div class="bento-card p-8 lg:p-10 flex flex-col">
                 <div class="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
                     <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Каталог дисциплин</h2>
@@ -104,40 +120,23 @@
                 <form @submit.prevent="addSubject" class="mb-10 space-y-5">
                     <div>
                         <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Название дисциплины</label>
-                        <input v-model="newSubject.name" type="text" required placeholder="Напр. Высшая математика"
-                               class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
+                        <input v-model="newSubject.name" type="text" required placeholder="Напр. Высшая математика" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
                     </div>
-                    <button type="submit" class="w-full btn-emerald font-extrabold text-base py-4 rounded-2xl">
-                        Добавить в каталог
-                    </button>
+                    <button type="submit" class="w-full btn-emerald font-extrabold text-base py-4 rounded-2xl">Добавить в каталог</button>
                 </form>
 
                 <div class="space-y-4 overflow-y-auto max-h-[600px] pr-3">
                     <div v-for="s in subjects" :key="s.id" class="group flex justify-between items-center p-5 rounded-2xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 transition-all">
                         <span class="font-extrabold text-lg text-slate-800 tracking-tight">{{ s.name }}</span>
-                        <button @click="deleteSubject(s.id)" class="btn-coral font-bold px-4 py-2 rounded-xl text-xs opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-                            Удалить
-                        </button>
+                        <button @click="deleteSubject(s.id)" class="btn-coral font-bold px-4 py-2 rounded-xl text-xs opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">Удалить</button>
                     </div>
-                    <div v-if="subjects.length === 0" class="text-center text-slate-400 py-12 font-bold text-lg">Каталог пуст.</div>
                 </div>
             </div>
 
         </div>
 
-        <Transition name="fade">
-            <div v-if="errorMessage" class="fixed bottom-8 right-8 max-w-sm bg-rose-600 text-white p-6 rounded-3xl shadow-2xl z-50 flex items-start gap-4">
-                <div class="flex-1">
-                    <h4 class="font-black text-base tracking-tight mb-1">Ошибка</h4>
-                    <p class="text-sm font-medium text-rose-100 leading-relaxed">{{ errorMessage }}</p>
-                </div>
-                <button @click="errorMessage = ''" class="text-white opacity-70 hover:opacity-100 font-bold text-xl transition-all">✕</button>
-            </div>
-        </Transition>
-
     </div>
 
-    <!-- ТВОЙ ОРИГИНАЛЬНЫЙ СКРИПТ VUE (БЕЗ ИЗМЕНЕНИЙ) -->
     <script>
         const { createApp, ref, onMounted } = Vue;
 
@@ -146,138 +145,68 @@
                 const groups = ref([]);
                 const subjects = ref([]);
 
-                const newGroup = ref({ number: null, has_saturday: false });
+                const newGroup = ref({ number: null, course: 1, has_saturday: false, semester_weeks: 20 });
                 const editingGroupId = ref(null);
                 const newSubject = ref({ name: '' });
                 const errorMessage = ref('');
 
                 const fetchData = async () => {
                     try {
-                        const [gRes, sRes] = await Promise.all([
-                            fetch('http://localhost:8000/groups/'),
-                            fetch('http://localhost:8000/subjects/')
-                        ]);
-
+                        const [gRes, sRes] = await Promise.all([ fetch('http://localhost:8000/groups/'), fetch('http://localhost:8000/subjects/') ]);
                         if (gRes.ok) groups.value = await gRes.json();
                         if (sRes.ok) subjects.value = await sRes.json();
-                    } catch (e) {
-                        errorMessage.value = "Не удалось подключиться к серверу API.";
-                    }
+                    } catch (e) { errorMessage.value = "Не удалось подключиться к серверу API."; }
                 };
 
                 onMounted(fetchData);
 
-                // --- Управление группами ---
                 const saveGroup = async () => {
                     errorMessage.value = '';
                     try {
-                        const url = editingGroupId.value
-                            ? `http://localhost:8000/groups/${editingGroupId.value}`
-                            : 'http://localhost:8000/groups/';
+                        const url = editingGroupId.value ? `http://localhost:8000/groups/${editingGroupId.value}` : 'http://localhost:8000/groups/';
                         const method = editingGroupId.value ? 'PUT' : 'POST';
-
-                        const res = await fetch(url, {
-                            method: method,
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(newGroup.value)
-                        });
-
-                        if (res.ok) {
-                            resetGroupForm();
-                            await fetchData();
-                        } else {
-                            const errData = await res.json();
-                            errorMessage.value = errData.detail || "Ошибка сохранения группы (возможно, номер уже существует)";
-                        }
-                    } catch (e) {
-                        errorMessage.value = "Ошибка связи с сервером при сохранении группы";
-                    }
+                        const res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newGroup.value) });
+                        if (res.ok) { resetGroupForm(); await fetchData(); }
+                        else errorMessage.value = (await res.json()).detail || "Ошибка сохранения";
+                    } catch (e) { errorMessage.value = "Ошибка сервера"; }
                 };
 
                 const editGroup = (g) => {
                     editingGroupId.value = g.id;
-                    newGroup.value = { number: g.number, has_saturday: Boolean(g.has_saturday) };
+                    newGroup.value = { number: g.number, course: g.course || 1, has_saturday: Boolean(g.has_saturday), semester_weeks: g.semester_weeks || 20 };
                 };
 
                 const resetGroupForm = () => {
                     editingGroupId.value = null;
-                    newGroup.value = { number: null, has_saturday: false };
+                    newGroup.value = { number: null, course: 1, has_saturday: false, semester_weeks: 20 };
                 };
 
                 const deleteGroup = async (id) => {
-                    if (!confirm('Точно удалить эту группу? Убедитесь, что для нее нет активных учебных планов.')) return;
-                    try {
-                        const res = await fetch(`http://localhost:8000/groups/${id}`, { method: 'DELETE' });
-                        if (res.ok) {
-                            await fetchData();
-                        } else {
-                            const errData = await res.json();
-                            errorMessage.value = errData.detail || "Не удалось удалить группу";
-                        }
-                    } catch (e) {
-                        errorMessage.value = "Ошибка связи с сервером";
-                    }
+                    if (!confirm('Точно удалить?')) return;
+                    await fetch(`http://localhost:8000/groups/${id}`, { method: 'DELETE' });
+                    fetchData();
                 };
 
                 const toggleSaturday = async (groupId) => {
-                    try {
-                        const res = await fetch(`http://localhost:8000/groups/${groupId}/toggle-saturday`, { method: 'POST' });
-                        if (res.ok) {
-                            await fetchData();
-                        } else {
-                            const errData = await res.json();
-                            errorMessage.value = errData.detail || "Ошибка изменения режима субботы";
-                        }
-                    } catch (e) {
-                        errorMessage.value = "Ошибка связи с сервером";
-                    }
+                    await fetch(`http://localhost:8000/groups/${groupId}/toggle-saturday`, { method: 'POST' });
+                    fetchData();
                 };
 
-                // --- Каталог предметов ---
                 const addSubject = async () => {
-                    errorMessage.value = '';
                     const trimmedName = newSubject.value.name.trim();
                     if (!trimmedName) return;
-
-                    try {
-                        const res = await fetch('http://localhost:8000/subjects/', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name: trimmedName })
-                        });
-
-                        if (res.ok) {
-                            newSubject.value.name = '';
-                            await fetchData();
-                        } else {
-                            const errData = await res.json();
-                            errorMessage.value = errData.detail || "Предмет с таким названием уже существует";
-                        }
-                    } catch (e) {
-                        errorMessage.value = "Ошибка связи с сервером при добавлении предмета";
-                    }
+                    await fetch('http://localhost:8000/subjects/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmedName }) });
+                    newSubject.value.name = '';
+                    fetchData();
                 };
 
                 const deleteSubject = async (id) => {
-                    if (!confirm('Удалить предмет из каталога?')) return;
-                    try {
-                        const res = await fetch(`http://localhost:8000/subjects/${id}`, { method: 'DELETE' });
-                        if (res.ok) {
-                            await fetchData();
-                        } else {
-                            const errData = await res.json();
-                            errorMessage.value = errData.detail || "Не удалось удалить предмет";
-                        }
-                    } catch (e) {
-                        errorMessage.value = "Ошибка связи с сервером";
-                    }
+                    if (!confirm('Удалить предмет?')) return;
+                    await fetch(`http://localhost:8000/subjects/${id}`, { method: 'DELETE' });
+                    fetchData();
                 };
 
-                return {
-                    groups, subjects, newGroup, editingGroupId, newSubject, errorMessage,
-                    saveGroup, editGroup, resetGroupForm, deleteGroup, toggleSaturday,
-                    addSubject, deleteSubject
-                };
+                return { groups, subjects, newGroup, editingGroupId, newSubject, errorMessage, saveGroup, editGroup, resetGroupForm, deleteGroup, toggleSaturday, addSubject, deleteSubject };
             }
         }).mount('#app');
     </script>

@@ -6,59 +6,74 @@ from sqlalchemy import or_, text
 
 from . import models, schemas, database, solver
 
+# Создание таблиц (миграции здесь лучше убрать, так как ты удалишь БД)
 models.Base.metadata.create_all(bind=database.engine)
-
-try:
-    with database.engine.begin() as conn:
-        cols_cp = [r[1] for r in conn.execute(text("PRAGMA table_info(course_plans)")).fetchall()]
-        if "max_weekly_hours" not in cols_cp:
-            conn.execute(text("ALTER TABLE course_plans ADD COLUMN max_weekly_hours INTEGER DEFAULT 4"))
-
-        cols_gr = [r[1] for r in conn.execute(text("PRAGMA table_info(groups)")).fetchall()]
-        if "course" not in cols_gr:
-            conn.execute(text("ALTER TABLE groups ADD COLUMN course INTEGER DEFAULT 1"))
-except Exception as e:
-    print("Ошибка миграции БД:", e)
 
 app = FastAPI(title="Schedule System API")
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
 
+# ----------------- КАБИНЕТЫ (НОВОЕ) -----------------
+@app.post("/rooms/", response_model=schemas.RoomOut)
+def create_room(room: schemas.RoomCreate, db: Session = Depends(database.get_db)):
+    db_room = models.Room(**room.dict())
+    db.add(db_room)
+    db.commit()
+    db.refresh(db_room)
+    return db_room
+
+
+@app.get("/rooms/", response_model=List[schemas.RoomOut])
+def read_rooms(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
+    return db.query(models.Room).offset(skip).limit(limit).all()
+
+
+@app.delete("/rooms/{room_id}")
+def delete_room(room_id: int, db: Session = Depends(database.get_db)):
+    db.query(models.Room).filter(models.Room.id == room_id).delete()
+    db.commit()
+    return {"ok": True}
+
+
+# ----------------- ПРЕПОДАВАТЕЛИ -----------------
 @app.post("/teachers/", response_model=schemas.TeacherOut)
 def create_teacher(teacher: schemas.TeacherCreate, db: Session = Depends(database.get_db)):
     db_teacher = models.Teacher(**teacher.dict())
     db.add(db_teacher)
     db.commit()
     db.refresh(db_teacher)
+    # Ручное добавление room_name для ответа
+    room = db.query(models.Room).filter(models.Room.id == db_teacher.room_id).first()
+    db_teacher.room_name = room.name if room else None
     return db_teacher
 
 
 @app.get("/teachers/", response_model=List[schemas.TeacherOut])
 def read_teachers(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
-    return db.query(models.Teacher).offset(skip).limit(limit).all()
+    teachers = db.query(models.Teacher).offset(skip).limit(limit).all()
+    rooms_dict = {r.id: r.name for r in db.query(models.Room).all()}
+    for t in teachers:
+        t.room_name = rooms_dict.get(t.room_id)
+    return teachers
 
 
 @app.put("/teachers/{teacher_id}", response_model=schemas.TeacherOut)
 def update_teacher(teacher_id: int, teacher_data: schemas.TeacherCreate, db: Session = Depends(database.get_db)):
     teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
-    for key, value in teacher_data.dict().items():
-        setattr(teacher, key, value)
+    for key, value in teacher_data.dict().items(): setattr(teacher, key, value)
     db.commit()
     db.refresh(teacher)
+    room = db.query(models.Room).filter(models.Room.id == teacher.room_id).first()
+    teacher.room_name = room.name if room else None
     return teacher
 
 
 @app.delete("/teachers/{teacher_id}")
 def delete_teacher(teacher_id: int, db: Session = Depends(database.get_db)):
-    teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
-    db.delete(teacher)
+    db.query(models.Teacher).filter(models.Teacher.id == teacher_id).delete()
     db.commit()
     return {"ok": True}
 
@@ -66,29 +81,33 @@ def delete_teacher(teacher_id: int, db: Session = Depends(database.get_db)):
 @app.get("/teachers-workload/")
 def get_teachers_workload(db: Session = Depends(database.get_db)):
     teachers = db.query(models.Teacher).all()
+    rooms_dict = {r.id: r.name for r in db.query(models.Room).all()}
     result = []
     for t in teachers:
         plans = db.query(models.CoursePlan).filter(
-            or_(
-                models.CoursePlan.teacher_id == t.id,
-                models.CoursePlan.teacher2_id == t.id
-            )
-        ).all()
-        # Считаем сумму часов на семестр и делим на 20 недель
-        total_semester_hours = sum(p.total_hours for p in plans)
-        weekly_hours = total_semester_hours / 20.0
+            or_(models.CoursePlan.teacher_id == t.id, models.CoursePlan.teacher2_id == t.id)).all()
+
+        total_semester_hours = 0
+        total_weekly_hours_estimated = 0
+
+        for p in plans:
+            total_semester_hours += p.total_hours
+            g = db.query(models.Group).filter(models.Group.id == p.group_id).first()
+            weeks = getattr(g, 'semester_weeks', 20) or 20
+            total_weekly_hours_estimated += (p.total_hours / weeks)
 
         result.append({
             "id": t.id,
             "name": t.name,
-            "default_room": t.default_room,
+            "room_name": rooms_dict.get(t.room_id, "Без кабинета"),
             "max_hours_per_week": t.max_hours_per_week,
-            "assigned_weekly_hours": round(weekly_hours, 1),
+            "assigned_weekly_hours": round(total_weekly_hours_estimated, 1),
             "total_semester_hours": total_semester_hours
         })
     return result
 
 
+# ----------------- ГРУППЫ -----------------
 @app.post("/groups/", response_model=schemas.GroupOut)
 def create_group(group: schemas.GroupCreate, db: Session = Depends(database.get_db)):
     db_group = models.Group(**group.dict())
@@ -109,6 +128,7 @@ def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = D
     group.number = group_data.number
     group.course = group_data.course
     group.has_saturday = group_data.has_saturday
+    group.semester_weeks = group_data.semester_weeks
     db.commit()
     db.refresh(group)
     return group
@@ -116,8 +136,7 @@ def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = D
 
 @app.delete("/groups/{group_id}")
 def delete_group(group_id: int, db: Session = Depends(database.get_db)):
-    group = db.query(models.Group).filter(models.Group.id == group_id).first()
-    db.delete(group)
+    db.query(models.Group).filter(models.Group.id == group_id).delete()
     db.commit()
     return {"ok": True}
 
@@ -140,6 +159,7 @@ def set_group_weekly_hours(group_id: int, payload: dict, db: Session = Depends(d
     return group
 
 
+# ----------------- ПРЕДМЕТЫ -----------------
 @app.get("/subjects/", response_model=List[schemas.SubjectOut])
 def get_subjects(db: Session = Depends(database.get_db)):
     return db.query(models.Subject).all()
@@ -161,6 +181,7 @@ def delete_subject(subject_id: int, db: Session = Depends(database.get_db)):
     return {"ok": True}
 
 
+# ----------------- УЧЕБНЫЕ ПЛАНЫ -----------------
 @app.post("/course_plans/", response_model=schemas.CoursePlanOut)
 def create_course_plan(plan: schemas.CoursePlanCreate, db: Session = Depends(database.get_db)):
     db_plan = models.CoursePlan(**plan.dict())
@@ -180,7 +201,7 @@ def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, db: Se
     plan = db.query(models.CoursePlan).filter(models.CoursePlan.id == plan_id).first()
     plan.subject_name = plan_data.subject_name
     plan.total_hours = plan_data.total_hours
-    plan.max_weekly_hours = plan_data.max_weekly_hours  # <-- ВОТ ОНО
+    plan.max_weekly_hours = plan_data.max_weekly_hours
     plan.group_id = plan_data.group_id
     plan.teacher_id = plan_data.teacher_id
     plan.teacher2_id = plan_data.teacher2_id
@@ -218,6 +239,7 @@ def get_plans_progress(group_id: Optional[int] = None, db: Session = Depends(dat
     return result
 
 
+# ----------------- АРХИВЫ И ГЕНЕРАЦИЯ -----------------
 @app.get("/archived-weeks/status")
 def get_archive_status(group_id: int, week_number: int, db: Session = Depends(database.get_db)):
     record = db.query(models.ArchivedWeek).filter_by(group_id=group_id, week_number=week_number).first()
@@ -235,16 +257,16 @@ def toggle_archive(data: schemas.ArchivedWeekToggle, db: Session = Depends(datab
     return {"is_archived": record.is_archived if record else True}
 
 
-@app.post("/generate_schedule/")
-def trigger_generation(group_id: Optional[int] = None, db: Session = Depends(database.get_db)):
-    teachers = db.query(models.Teacher).filter_by(is_active=True).all()
-    groups = db.query(models.Group).all()
-    course_plans = db.query(models.CoursePlan).all()
-    success = solver.generate_and_save_schedule(db, teachers, groups, course_plans, target_group_id=group_id)
-    if not success: raise HTTPException(status_code=400, detail="Ошибка: Невозможно уместить предметы в сетку.")
-    return {"message": "Успешно!"}
+@app.post("/generate_schedule/", response_model=schemas.GenerateResponse)
+def trigger_generation(week_number: int = 1, db: Session = Depends(database.get_db)):
+    # Вызываем глобальную генерацию на конкретную неделю
+    success, msg = solver.trigger_global_generation(db, week_number)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"status": "success", "message": msg}
 
 
+# ----------------- РАСПИСАНИЕ -----------------
 @app.get("/schedule/", response_model=List[schemas.ScheduleEntryOut])
 def get_schedule(group_id: Optional[int] = None, week_number: int = 1, db: Session = Depends(database.get_db)):
     query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.week_number == week_number)
