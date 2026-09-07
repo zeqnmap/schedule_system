@@ -2,19 +2,25 @@ import math
 from typing import Optional, List
 from ortools.sat.python import cp_model
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from . import models
 
 
+# --- ИДЕНТИФИКАТОР ФИЗКУЛЬТУРЫ ---
+def is_pe_subject(subject_name):
+    if not subject_name: return False
+    name = subject_name.lower()
+    return 'физ' in name or 'спорт' in name or 'здоров' in name
+
+
 class SubjectDemand:
-    def __init__(self, plan, pairs: int, singles: int, max_w_pairs: int, max_w_singles: int):
+    def __init__(self, plan, max_w_pairs: int, max_w_singles: int):
         self.plan = plan
         self.id = plan.id
         self.group_id = plan.group_id
-        self.pairs = pairs
-        self.singles = singles
         self.max_w_pairs = max_w_pairs
         self.max_w_singles = max_w_singles
+        self.rem_slots = 0
 
     @property
     def teacher_ids(self) -> List[int]:
@@ -30,125 +36,88 @@ def build_subject_demands(target_plans, groups_dict) -> List[SubjectDemand]:
         if not group: continue
         course = group.course
         w_hours = p.max_weekly_hours or 4
-        t_hours = p.total_hours
 
-        if w_hours == 3 and course in [1, 2]:
-            pairs = 0;
-            singles = t_hours;
-            mw_p = 0;
-            mw_s = 3
-        elif w_hours == 3 and course in [3, 4]:
-            pairs = t_hours // 3;
-            singles = t_hours - (pairs * 2);
-            mw_p = 1;
-            mw_s = 1
-        elif w_hours == 1:
-            pairs = 0;
-            singles = t_hours;
-            mw_p = 0;
-            mw_s = 1
+        if is_pe_subject(p.subject_name):
+            if course in [1, 2]:
+                mw_p = 0; mw_s = 3
+            else:
+                mw_p = 1; mw_s = 1
         else:
-            pairs = t_hours // 2;
-            singles = t_hours % 2;
-            mw_p = w_hours // 2;
-            mw_s = w_hours % 2
+            if w_hours == 1:
+                mw_p = 0; mw_s = 1
+            else:
+                mw_p = w_hours // 2; mw_s = w_hours % 2
 
-        if pairs > 0 or singles > 0:
-            demands.append(SubjectDemand(p, pairs, singles, mw_p, mw_s))
+        if mw_p > 0 or mw_s > 0:
+            demands.append(SubjectDemand(p, mw_p, mw_s))
     return demands
 
 
-# --- ШАГ 0: АВТО-ДОБАВЛЕНИЕ ЧАСОВ (AUTO-PADDING) ---
-def auto_pad_course_plans(db: Session, week_number: int, groups, course_plans, archived_weeks):
+def auto_pad_course_plans_for_all_weeks(db: Session, groups, course_plans):
     added_log = []
-
     for g in groups:
-        target = getattr(g, 'weekly_hours', 30) or 30
-        course = getattr(g, 'course', 1)
-        g_plans = [p for p in course_plans if p.group_id == g.id]
+        target_weekly = getattr(g, 'weekly_hours', 30) or 30
+        weeks_count = getattr(g, 'semester_weeks', 20) or 20
+        target_total_semester = target_weekly * weeks_count
+
+        all_g_plans = [p for p in course_plans if p.group_id == g.id]
+        # Физру не балансируем, она должна быть стабильной
+        g_plans = [p for p in all_g_plans if not is_pe_subject(p.subject_name)]
         if not g_plans: continue
 
-        archived_w = {a.week_number for a in archived_weeks if a.group_id == g.id and a.is_archived}
-        if week_number in archived_w: continue
+        sum_weekly = 0
+        for p in all_g_plans:
+            if is_pe_subject(p.subject_name):
+                sum_weekly += 3
+            else:
+                sum_weekly += (p.max_weekly_hours or 4)
 
-        # Узнаем, сколько уроков уже проведено
-        archived_counts = {}
-        if archived_w:
-            counts = db.query(models.ScheduleEntry.subject_name, func.count(models.ScheduleEntry.id)) \
-                .filter(models.ScheduleEntry.group_id == g.id) \
-                .filter(models.ScheduleEntry.week_number.in_(archived_w)) \
-                .group_by(models.ScheduleEntry.subject_name).all()
-            count_dict = {name: cnt for name, cnt in counts}
-            for p in g_plans: archived_counts[p.id] = count_dict.get(p.subject_name, 0)
-        else:
-            archived_counts = {p.id: 0 for p in g_plans}
+        weekly_add = {}
+        while sum_weekly < target_weekly:
+            g_plans.sort(key=lambda x: (x.max_weekly_hours or 4, x.total_hours))
+            p = g_plans[0]
+            # Добавляем парами, чтобы не плодить одиночные огрызки
+            inc = 2 if (target_weekly - sum_weekly) >= 2 else 1
+            p.max_weekly_hours = (p.max_weekly_hours or 4) + inc
+            weekly_add[p.subject_name] = weekly_add.get(p.subject_name, 0) + inc
+            sum_weekly += inc
 
-        def get_current_possible():
-            total_possible = 0
+        sum_total = sum(p.total_hours for p in all_g_plans)
+        total_add = {}
+        while sum_total < target_total_semester:
+            g_plans.sort(key=lambda x: (x.total_hours, x.max_weekly_hours or 4))
+            p = g_plans[0]
+            inc = 2 if (target_total_semester - sum_total) >= 2 else 1
+            p.total_hours += inc
+            total_add[p.subject_name] = total_add.get(p.subject_name, 0) + inc
+            sum_total += inc
+
+            if p.total_hours > (p.max_weekly_hours or 4) * weeks_count:
+                p.max_weekly_hours = (p.max_weekly_hours or 4) + 1
+                weekly_add[p.subject_name] = weekly_add.get(p.subject_name, 0) + 1
+
+        if weekly_add or total_add:
+            log_parts = []
             for p in g_plans:
-                w_hours = p.max_weekly_hours or 4
-                t_hours = p.total_hours
+                w_add = weekly_add.get(p.subject_name, 0)
+                t_add = total_add.get(p.subject_name, 0)
+                if w_add > 0 or t_add > 0:
+                    log_parts.append(f"{p.subject_name} (+{t_add}ч сем / +{w_add}ч нед)")
+            added_log.append(f"Гр. {g.number}: {', '.join(log_parts)}")
 
-                if w_hours == 3 and course in [1, 2]:
-                    mw_p = 0; mw_s = 3
-                elif w_hours == 3 and course in [3, 4]:
-                    mw_p = 1; mw_s = 1
-                elif w_hours == 1:
-                    mw_p = 0; mw_s = 1
-                else:
-                    mw_p = w_hours // 2; mw_s = w_hours % 2
-
-                arch_cnt = archived_counts.get(p.id, 0)
-                rem_slots = max(0, t_hours - arch_cnt)
-
-                if w_hours == 3 and course in [1, 2]:
-                    rem_p = 0; rem_s = rem_slots
-                elif w_hours == 1:
-                    rem_p = 0; rem_s = rem_slots
-                else:
-                    rem_p = rem_slots // 2; rem_s = rem_slots % 2
-
-                total_possible += (min(mw_p, rem_p) * 2) + min(mw_s, rem_s)
-            return total_possible
-
-        group_added = {}
-        while True:
-            current_possible = get_current_possible()
-            if current_possible >= target: break
-
-            # Сортируем: сначала предметы с наименьшим числом часов в неделю!
-            g_plans.sort(key=lambda x: (x.max_weekly_hours, x.total_hours))
-            lowest_plan = g_plans[0]
-
-            # Накидываем часы в базу
-            lowest_plan.max_weekly_hours += 1
-            lowest_plan.total_hours += 1
-
-            group_added[lowest_plan.subject_name] = group_added.get(lowest_plan.subject_name, 0) + 1
-
-        if group_added:
-            details = ", ".join([f"{subj} (+{cnt}ч)" for subj, cnt in group_added.items()])
-            added_log.append(f"Гр. {g.number}: {details}")
-
-    if added_log:
-        db.commit()  # Сохраняем изменения учебных планов навсегда
-
+    if added_log: db.commit()
     return added_log
 
 
-# --- ШАГ 1: ПРЕД-ПРОВЕРКА (АУДИТ ОШИБОК) ---
-def preflight_check(db: Session, week_number: int, groups, teachers, rooms, course_plans, archived_weeks):
+def preflight_check(db: Session, groups, teachers, rooms, course_plans):
     errors = []
-
-    # 1. Проверка нагрузки учителей
     for t in teachers:
         t_plans = [p for p in course_plans if p.teacher_id == t.id or p.teacher2_id == t.id]
-        requested_weekly_hours = sum(p.max_weekly_hours for p in t_plans)
+        requested_weekly_hours = sum((p.max_weekly_hours or 4) for p in t_plans)
         if requested_weekly_hours > t.max_hours_per_week:
             errors.append(
-                f"Преподаватель '{t.name}' ПЕРЕГРУЖЕН: требуется {requested_weekly_hours} ч/нед (сумма по всем его группам), а лимит всего {t.max_hours_per_week} ч/нед. Добавьте лимит в карточке.")
+                f"Преподаватель '{t.name}' ПЕРЕГРУЖЕН: требуется {requested_weekly_hours} ч/нед (сумма по всем его группам), а лимит всего {t.max_hours_per_week} ч/нед.")
 
-    # 2. Проверка конфликта кабинетов
     room_occupants = {}
     for t in teachers:
         if t.room_id: room_occupants.setdefault(t.room_id, []).append(t.name)
@@ -156,12 +125,11 @@ def preflight_check(db: Session, week_number: int, groups, teachers, rooms, cour
         if len(occupants) > 1:
             r_name = next((r.name for r in rooms if r.id == r_id), str(r_id))
             errors.append(
-                f"КОНФЛИКТ КАБИНЕТА: За кабинетом '{r_name}' закреплено сразу несколько преподавателей ({', '.join(occupants)}). Кабинет должен быть строго 1 на 1.")
+                f"КОНФЛИКТ КАБИНЕТА: За кабинетом '{r_name}' закреплено несколько преподавателей ({', '.join(occupants)}). Кабинет строго 1 на 1.")
 
     return errors
 
 
-# --- ШАГ 2: ГЛОБАЛЬНЫЙ РЕШАТЕЛЬ ДЛЯ ВСЕХ ГРУПП ОДНОВРЕМЕННО ---
 def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_plans, slots_per_day: int = 12) -> tuple[
     bool, str]:
     archived_w = {a.group_id for a in db.query(models.ArchivedWeek).filter_by(week_number=week, is_archived=True).all()}
@@ -175,10 +143,39 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
 
     teacher_rooms = {t.id: next((r.name for r in rooms if r.id == t.room_id), "Без каб.") for t in teachers}
 
+    # ФИКС 36 ЧАСОВ: Удаляем и `planned`, и старые багнутые записи без статуса (`None`)
     db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == week,
-        models.ScheduleEntry.group_id.in_(groups_dict.keys())
+        models.ScheduleEntry.group_id.in_(groups_dict.keys()),
+        or_(models.ScheduleEntry.status == 'planned', models.ScheduleEntry.status == None)
     ).delete()
+    db.flush()
+
+    for u in demands:
+        consumed = db.query(models.ScheduleEntry).filter(
+            models.ScheduleEntry.group_id == u.group_id,
+            models.ScheduleEntry.subject_name == u.plan.subject_name,
+            models.ScheduleEntry.status != 'canceled',
+            models.ScheduleEntry.week_number < week
+        ).count()
+        u.rem_slots = max(0, u.plan.total_hours - consumed)
+
+    if all(u.rem_slots <= 0 for u in demands):
+        return True, "Часы завершены."
+
+    fixed_entries = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.status == 'planned',
+        models.ScheduleEntry.week_number == week
+    ).all()
+
+    fixed_t = set()
+    fixed_r = set()
+    for e in fixed_entries:
+        d_idx = e.day_of_week - 1
+        h_idx = e.time_slot - 1
+        if e.teacher_id: fixed_t.add((d_idx, h_idx, e.teacher_id))
+        if e.teacher2_id: fixed_t.add((d_idx, h_idx, e.teacher2_id))
+        if e.room_name: fixed_r.add((d_idx, h_idx, str(e.room_name).strip()))
 
     model = cp_model.CpModel()
     P = {};
@@ -197,7 +194,6 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
                 for u in g_demands:
                     P[(g.id, d, ps, u.id)] = model.NewBoolVar(f'P_g{g.id}_d{d}_ps{ps}_u{u.id}')
 
-    # ГЛОБАЛЬНЫЕ БЛОКИРОВКИ: Преподаватели и Кабинеты
     for d in range(6):
         for h in range(slots_per_day):
             for t in teachers:
@@ -219,24 +215,31 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
 
     unit_sums = []
     penalties = []
+    early_bonus = []
 
     for g in active_groups:
         active_days = 6 if g.has_saturday else 5
         g_demands = [u for u in demands if u.group_id == g.id]
+
+        target_weekly = getattr(g, 'weekly_hours', 30) or 30
+        w_load = sum(
+            schedule[(g.id, d, h, u.id)] for d in range(active_days) for h in range(slots_per_day) for u in g_demands)
+        model.Add(w_load <= target_weekly)
 
         for d in range(active_days):
             for h in range(slots_per_day):
                 ps = h // 2
                 for u in g_demands:
                     model.Add(schedule[(g.id, d, h, u.id)] == P[(g.id, d, ps, u.id)] + S[(g.id, d, h, u.id)])
+                    early_bonus.append(schedule[(g.id, d, h, u.id)] * (20 - h) * 10)
                 model.Add(sum(schedule[(g.id, d, h, u.id)] for u in g_demands) <= 1)
 
             for u in g_demands:
                 has_p = sum(P[(g.id, d, ps, u.id)] for ps in range(slots_per_day // 2))
                 has_s = sum(S[(g.id, d, h, u.id)] for h in range(slots_per_day))
-                model.Add(has_p + has_s <= 1)
+                model.Add(has_p <= 1);
+                model.Add(has_s <= 1)
 
-                # ИДЕАЛЬНЫЙ МОНОЛИТ БЕЗ ОКОН
             is_active = []
             for h in range(slots_per_day):
                 act = model.NewBoolVar(f'act_g{g.id}_d{d}_h{h}')
@@ -245,7 +248,6 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
 
             duration = model.NewIntVar(0, slots_per_day, f'dur_g{g.id}_{d}')
             model.Add(duration == sum(is_active))
-
             day_present = model.NewBoolVar(f'pres_g{g.id}_{d}')
             model.Add(duration > 0).OnlyEnforceIf(day_present)
             model.Add(duration == 0).OnlyEnforceIf(day_present.Not())
@@ -253,23 +255,26 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
             start_var = model.NewIntVar(0, slots_per_day - 1, f'start_g{g.id}_{d}')
             end_var = model.NewIntVar(0, slots_per_day - 1, f'end_g{g.id}_{d}')
 
-            # Старт либо с 1 урока (0), либо с 3 пары (4)
             model.AddAllowedAssignments([start_var], [(0,), (4,)])
             model.Add(end_var - start_var + 1 == duration).OnlyEnforceIf(day_present)
 
+            is_second_shift = model.NewBoolVar(f'is_2nd_shift_g{g.id}_{d}')
+            model.Add(start_var == 4).OnlyEnforceIf(is_second_shift)
+            model.Add(start_var != 4).OnlyEnforceIf(is_second_shift.Not())
+            penalties.append(5000 * is_second_shift)
+
             for h in range(slots_per_day):
-                after_start = model.NewBoolVar('')
+                after_start = model.NewBoolVar('');
                 before_end = model.NewBoolVar('')
                 model.Add(start_var <= h).OnlyEnforceIf(after_start)
                 model.Add(start_var > h).OnlyEnforceIf(after_start.Not())
                 model.Add(end_var >= h).OnlyEnforceIf(before_end)
                 model.Add(end_var < h).OnlyEnforceIf(before_end.Not())
-
                 model.AddBoolAnd([after_start, before_end]).OnlyEnforceIf(is_active[h])
                 model.AddBoolOr([after_start.Not(), before_end.Not()]).OnlyEnforceIf(is_active[h].Not())
 
-            model.Add(duration <= 10)  # Максимум 5 пар в день
-            model.Add(end_var <= 9).OnlyEnforceIf(day_present)  # При старте с 3 пары закончат макс через 3 пары
+            model.Add(duration <= 10)
+            model.Add(end_var <= 9).OnlyEnforceIf(day_present)
             penalties.append(10000 * day_present.Not())
 
             is_5_pairs = model.NewBoolVar(f'is_5p_g{g.id}_{d}')
@@ -280,14 +285,26 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
         for u in g_demands:
             sum_p = sum(P[(g.id, d, ps, u.id)] for d in range(active_days) for ps in range(slots_per_day // 2))
             sum_s = sum(S[(g.id, d, h, u.id)] for d in range(active_days) for h in range(slots_per_day))
-            model.Add(sum_p <= u.max_w_pairs)
-            model.Add(sum_s <= u.max_w_singles)
-            unit_sums.append(sum_p * 2 + sum_s)
 
-    model.Maximize(100000 * sum(unit_sums) - sum(penalties))
+            # ДИНАМИЧЕСКИЙ ФИКС НЕЧЕТНЫХ ЧАСОВ (Проблема 30/31 и 32/33)
+            # Если остался ровно 1 час, разрешаем поставить одиночный урок, даже если по правилу нужны пары!
+            eff_max_s = u.max_w_singles
+            if u.rem_slots % 2 != 0:
+                eff_max_s = max(1, u.max_w_singles)
+
+            model.Add(sum_p <= u.max_w_pairs)
+            model.Add(sum_s <= eff_max_s)
+            model.Add(sum_p * 2 + sum_s <= u.rem_slots)
+
+            # АНТИ-ГОЛОДАНИЕ (Решает проблему Биологии 14/31)
+            # Умножаем вес предмета на его остаток. Чем больше осталось часов, тем отчаяннее алгоритм будет их ставить!
+            weight = u.rem_slots if u.rem_slots > 0 else 1
+            unit_sums.append((sum_p * 2 + sum_s) * weight)
+
+    model.Maximize(100000 * sum(unit_sums) - sum(penalties) + sum(early_bonus))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 60.0
+    solver.parameters.max_time_in_seconds = 2.0
     status = solver.Solve(model)
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -306,35 +323,49 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
                                 teacher_id=u.plan.teacher_id,
                                 teacher2_id=u.plan.teacher2_id,
                                 group_id=g.id,
-                                subject_name=u.plan.subject_name
+                                subject_name=u.plan.subject_name,
+                                status='planned'
                             ))
         db.commit()
-        return True, "Расписание успешно сгенерировано!"
-    return False, "КРИТИЧЕСКАЯ ОШИБКА: Алгоритм зашел в тупик. Слишком мало преподавателей/кабинетов, чтобы уместить все группы без 'окон'."
+        return True, "Успех"
+    return False, f"Математический тупик на неделе {week}."
 
 
-def trigger_global_generation(db: Session, week_number: int):
+def trigger_global_generation(db: Session):
     teachers = db.query(models.Teacher).filter_by(is_active=True).all()
     groups = db.query(models.Group).all()
     rooms = db.query(models.Room).all()
     course_plans = db.query(models.CoursePlan).all()
     archived_weeks = db.query(models.ArchivedWeek).all()
 
-    # ШАГ 0: АВТО-БАЛАНСИРОВКА ЧАСОВ (Auto-Padding)
-    added_log = auto_pad_course_plans(db, week_number, groups, course_plans, archived_weeks)
+    if not groups: return False, "Нет групп для генерации."
 
-    # ШАГ 1: АУДИТ ОШИБОК
-    errors = preflight_check(db, week_number, groups, teachers, rooms, course_plans, archived_weeks)
+    max_weeks = max((g.semester_weeks or 20) for g in groups)
+    added_log = auto_pad_course_plans_for_all_weeks(db, groups, course_plans)
+
+    errors = preflight_check(db, groups, teachers, rooms, course_plans)
     if errors:
         err_msg = "ОШИБКИ ДО ГЕНЕРАЦИИ:\n" + "\n".join(errors)
-        if added_log: err_msg += "\n\n(Алгоритм добавил новые часы группам, из-за чего мог возникнуть перегруз преподавателей)."
+        if added_log: err_msg += "\n\n(Были добавлены часы для балансировки)."
         return False, err_msg
 
-    # ШАГ 2: ГЛОБАЛЬНАЯ ГЕНЕРАЦИЯ
-    success, msg = solve_global_week(db, week_number, groups, teachers, rooms, course_plans)
+    archived_set = {(a.group_id, a.week_number) for a in archived_weeks if a.is_archived}
+    entries = db.query(models.ScheduleEntry).filter(
+        or_(models.ScheduleEntry.status == 'planned', models.ScheduleEntry.status == None)).all()
+    for e in entries:
+        if (e.group_id, e.week_number) not in archived_set:
+            db.delete(e)
+    db.commit()
 
-    # ЕСЛИ ВСЕ УСПЕШНО, ВЫВОДИМ ОТЧЕТ
-    if success and added_log:
-        msg += "\n\nАВТОМАТИЧЕСКИ ДОБАВЛЕНО ДО НОРМЫ (Часы сохранены в базу):\n" + "\n".join(added_log)
+    success_weeks = 0
+    for w in range(1, max_weeks + 1):
+        success, msg = solve_global_week(db, w, groups, teachers, rooms, course_plans)
+        if not success:
+            return False, f"Ошибка на {w} неделе: {msg}"
+        success_weeks += 1
 
-    return success, msg
+    final_msg = f"Успешно сгенерировано расписание на {success_weeks} недель!"
+    if added_log:
+        final_msg += "\n\nАВТОМАТИЧЕСКИ ДОБАВЛЕНО ЧАСОВ:\n" + "\n".join(added_log)
+
+    return True, final_msg

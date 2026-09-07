@@ -227,8 +227,13 @@ def get_plans_progress(group_id: Optional[int] = None, db: Session = Depends(dat
 
     result = []
     for p in plans:
-        actual_count = db.query(models.ScheduleEntry).filter_by(group_id=p.group_id,
-                                                                subject_name=p.subject_name).count()
+        # ВАЖНО: Считаем только живые часы. Болезни (canceled) не идут в зачет!
+        actual_count = db.query(models.ScheduleEntry).filter(
+            models.ScheduleEntry.group_id == p.group_id,
+            models.ScheduleEntry.subject_name == p.subject_name,
+            models.ScheduleEntry.status != 'canceled'
+        ).count()
+
         percentage = round((actual_count / p.total_hours * 100), 1) if p.total_hours > 0 else 0
         result.append({
             "plan_id": p.id, "group_id": p.group_id, "group_number": groups_dict.get(p.group_id, str(p.group_id)),
@@ -245,34 +250,29 @@ def get_archive_status(group_id: int, week_number: int, db: Session = Depends(da
     record = db.query(models.ArchivedWeek).filter_by(group_id=group_id, week_number=week_number).first()
     return {"is_archived": record.is_archived if record else False}
 
-
 @app.post("/archived-weeks/toggle")
 def toggle_archive(data: schemas.ArchivedWeekToggle, db: Session = Depends(database.get_db)):
     record = db.query(models.ArchivedWeek).filter_by(group_id=data.group_id, week_number=data.week_number).first()
-    if record:
-        record.is_archived = not record.is_archived
-    else:
-        db.add(models.ArchivedWeek(group_id=data.group_id, week_number=data.week_number, is_archived=True))
+    if record: record.is_archived = not record.is_archived
+    else: db.add(models.ArchivedWeek(group_id=data.group_id, week_number=data.week_number, is_archived=True))
     db.commit()
     return {"is_archived": record.is_archived if record else True}
 
-
 @app.post("/generate_schedule/", response_model=schemas.GenerateResponse)
-def trigger_generation(week_number: int = 1, db: Session = Depends(database.get_db)):
-    # Вызываем глобальную генерацию на конкретную неделю
-    success, msg = solver.trigger_global_generation(db, week_number)
+def trigger_generation(db: Session = Depends(database.get_db)):
+    # Генерируем ВЕСЬ семестр сразу
+    success, msg = solver.trigger_global_generation(db)
     if not success:
         raise HTTPException(status_code=400, detail=msg)
     return {"status": "success", "message": msg}
 
 
-# ----------------- РАСПИСАНИЕ -----------------
+# ----------------- РАСПИСАНИЕ И СТАТУСЫ -----------------
 @app.get("/schedule/", response_model=List[schemas.ScheduleEntryOut])
 def get_schedule(group_id: Optional[int] = None, week_number: int = 1, db: Session = Depends(database.get_db)):
     query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.week_number == week_number)
     if group_id: query = query.filter(models.ScheduleEntry.group_id == group_id)
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
-
 
 @app.post("/schedule/", response_model=schemas.ScheduleEntryOut)
 def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session = Depends(database.get_db)):
@@ -282,19 +282,36 @@ def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session =
     db.refresh(new_entry)
     return new_entry
 
-
 @app.put("/schedule/{entry_id}", response_model=schemas.ScheduleEntryOut)
-def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdate,
-                          db: Session = Depends(database.get_db)):
+def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdate, db: Session = Depends(database.get_db)):
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
     for key, value in update_data.dict().items(): setattr(entry, key, value)
     db.commit()
     db.refresh(entry)
     return entry
 
-
 @app.delete("/schedule/{entry_id}")
 def delete_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
     db.query(models.ScheduleEntry).filter_by(id=entry_id).delete()
     db.commit()
     return {"ok": True}
+
+# --- НОВЫЕ ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ БОЛЕЗНЯМИ ---
+@app.post("/schedule/{entry_id}/cancel", response_model=schemas.ScheduleEntryOut)
+def cancel_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
+    entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
+    entry.status = "canceled"
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+@app.post("/schedule/{entry_id}/restore", response_model=schemas.ScheduleEntryOut)
+def restore_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
+    entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
+    entry.status = "planned"
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+

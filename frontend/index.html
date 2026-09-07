@@ -14,14 +14,11 @@
         .input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
         .btn-emerald { background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; box-shadow: 0 8px 24px -6px rgba(16, 185, 129, 0.4); transition: all 0.2s ease; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
         .btn-emerald:hover { box-shadow: 0 12px 32px -6px rgba(16, 185, 129, 0.5); transform: translateY(-2px); }
-        .slot-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 24px; transition: all 0.2s ease; cursor: pointer; position: relative; overflow: hidden; width: 100%; }
-        .slot-card:hover { border-color: #10B981; box-shadow: 0 12px 30px -8px rgba(16, 185, 129, 0.2); transform: translateY(-3px); }
-        .slot-empty { background-color: rgba(248, 250, 252, 0.6); border: 2px dashed #E2E8F0; border-radius: 24px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; cursor: pointer; }
-        .slot-empty:hover { border-color: #10B981; background-color: #ECFDF5; }
+        .slot-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 24px; transition: all 0.3s ease; cursor: pointer; position: absolute; overflow: hidden; width: 100%; height: 100%; }
+        .slot-card:hover { box-shadow: 0 12px 30px -8px rgba(0,0,0,0.1); }
         .modal-glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
         .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
         .fade-enter-from, .fade-leave-to { opacity: 0; }
-        /* Анимация спиннера */
         .spinner { border: 4px solid rgba(255,255,255,0.3); width: 40px; height: 40px; border-radius: 50%; border-left-color: #fff; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         [v-cloak] { display: none; }
@@ -47,7 +44,6 @@
 
     <div id="app" v-cloak class="max-w-[1800px] mx-auto px-6 lg:px-10 pt-32 pb-16">
 
-        <!-- ЛОАДЕР ГЕНЕРАЦИИ -->
         <Transition name="fade">
             <div v-if="isGenerating" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[200] flex flex-col items-center justify-center text-white">
                 <div class="spinner mb-6"></div>
@@ -59,17 +55,16 @@
         <header class="flex flex-col lg:flex-row justify-between items-start lg:items-end mb-10">
             <div>
                 <h1 class="text-4xl lg:text-5xl font-black text-slate-900 tracking-tight leading-tight mb-2">Сетка расписания</h1>
-                <p class="text-lg lg:text-xl text-slate-500 font-medium">Точное соблюдение нормы часов группы на каждой неделе</p>
+                <p class="text-lg lg:text-xl text-slate-500 font-medium">Слой реальности: отмены, замены и фиксация факта</p>
             </div>
             <div class="flex gap-3 mt-6 lg:mt-0">
                 <button @click="generateScheduleAll" class="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-base px-8 py-4 rounded-2xl flex items-center gap-3 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.5)] transition-all">
                     <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
-                    <span>Сгенерировать ВСЕМ (Неделя {{ selectedWeek }})</span>
+                    <span>Сгенерировать ВЕСЬ СЕМЕСТР</span>
                 </button>
             </div>
         </header>
 
-        <!-- ПАНЕЛЬ УПРАВЛЕНИЯ -->
         <div class="bento-card p-6 mb-10 flex flex-wrap gap-6 items-center justify-between">
             <div class="flex flex-wrap items-center gap-4 w-full xl:w-auto">
                 <div class="flex items-center gap-3">
@@ -82,14 +77,14 @@
                         <option v-for="w in currentGroupSemesterWeeks" :key="w" :value="w">Неделя {{ w }}</option>
                     </select>
                 </div>
-                <button @click="changeWeeklyHoursPrompt" title="Нажмите, чтобы изменить жесткую норму часов" class="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-extrabold text-sm transition-all flex items-center gap-2">
-                    ⏱️ Учится: <span :class="currentWeekActualHours > currentGroupWeeklyHours ? 'text-rose-600' : 'text-emerald-600'">{{ currentWeekActualHours }}</span> / {{ currentGroupWeeklyHours }} ч.
+                <button @click="changeWeeklyHoursPrompt" class="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-extrabold text-sm transition-all flex items-center gap-2">
+                    ⏱️ Акт. пары: <span class="text-emerald-600">{{ currentWeekActualHours }}</span> / {{ currentGroupWeeklyHours }} ч.
                 </button>
-                <button @click="toggleSaturdayForGroup" :class="currentGroupHasSaturday ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'" class="px-5 py-3.5 rounded-2xl font-extrabold text-sm border transition-all flex items-center gap-2">
+                <button @click="toggleSaturdayForGroup" :class="currentGroupHasSaturday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-5 py-3.5 rounded-2xl font-extrabold text-sm border transition-all flex items-center gap-2">
                     {{ currentGroupHasSaturday ? '📅 6 дней (суббота вкл)' : '☕ 5 дней (без субботы)' }}
                 </button>
             </div>
-            <button @click="toggleArchive" :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'" class="px-6 py-3.5 rounded-2xl font-extrabold text-sm border transition-all w-full xl:w-auto">
+            <button @click="toggleArchive" :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-6 py-3.5 rounded-2xl font-extrabold text-sm border transition-all w-full xl:w-auto">
                 {{ isArchived ? '🔒 Разблокировать неделю' : '📦 Заархивировать' }}
             </button>
         </div>
@@ -98,44 +93,74 @@
             🔒 Эта неделя заархивирована. Любые изменения и перезапись заблокированы.
         </div>
 
+        <!-- СЕТКА: ЖЕСТКАЯ ФИКСАЦИЯ И СТОПКА КАРТ (НАКАЛЫВАНИЕ) -->
         <div class="grid gap-6" :class="showSaturday ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'">
             <div v-for="day in (showSaturday ? 6 : 5)" :key="day" class="flex flex-col gap-4">
                 <h2 class="text-center font-black text-slate-400 uppercase tracking-widest text-[11px] mb-1" :class="day === 6 ? 'text-indigo-400' : ''">
                     {{ getDayName(day) }}
                 </h2>
 
-                <div v-for="slot in 12" :key="slot" class="group relative flex h-[130px]">
-                    <div v-if="getEntry(day, slot)" @click="openEditModal(getEntry(day, slot))" class="slot-card h-full w-full p-4 flex flex-col" :class="isArchived ? 'opacity-80 cursor-not-allowed' : ''">
-                        <div class="absolute top-0 left-0 w-1.5 h-full bg-emerald-400"></div>
-                        <div class="flex justify-between items-start mb-1">
-                            <div></div><span class="text-[10px] font-extrabold text-slate-300">{{ slot }} урок</span>
+                <!-- ГЛАВНЫЙ СЛОТ: Жесткая высота 130px. Все карточки внутри позиционируются абсолютно -->
+                <div v-for="slot in 12" :key="slot" class="group relative h-[130px] w-full perspective-1000">
+
+                    <!-- Если слот ПУСТОЙ -->
+                    <div v-if="getEntries(day, slot).length === 0" @click="!isArchived && openCreateModal(day, slot)"
+                         class="absolute inset-0 z-0 flex items-center justify-center border-2 border-dashed border-slate-200 bg-slate-50/50 rounded-2xl cursor-pointer hover:border-emerald-300 transition-colors">
+                        <span class="text-[10px] font-extrabold text-slate-300 absolute top-3 left-4">{{ slot }} урок</span>
+                        <span v-if="!isArchived" class="text-emerald-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity bg-white shadow-sm px-4 py-2 rounded-xl text-sm">➕ Добавить</span>
+                    </div>
+
+                    <!-- Карточки (Слои накладываются друг на друга) -->
+                    <div v-for="(entry, idx) in getEntries(day, slot)" :key="entry.id" @click="openEditModal(entry)"
+                         class="slot-card p-4 flex flex-col border transition-all duration-300"
+                         :class="[
+                            isArchived ? 'opacity-80 cursor-not-allowed' : '',
+                            entry.status === 'canceled' ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200',
+                            /* Если это болезнь И есть замена -> карточка болезни уходит вниз, выглядывает из-под низа */
+                            entry.status === 'canceled' && hasActiveEntry(day, slot) ? 'z-10 transform scale-[0.96] translate-y-3 opacity-60 hover:opacity-100 hover:z-30 hover:scale-100 hover:translate-y-0 shadow-sm' : 'z-20 shadow-sm hover:shadow-md'
+                         ]">
+
+                        <div v-if="entry.status === 'canceled'" class="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-30">
+                            <span class="bg-rose-600 text-white font-black text-lg px-4 py-1 rounded-xl transform -rotate-12 border-2 border-white">ОТМЕНЕНА</span>
                         </div>
-                        <div class="font-black text-slate-900 text-sm leading-snug line-clamp-2 mb-auto" :title="getEntry(day, slot).subject_name">
-                            {{ getEntry(day, slot).subject_name }}
+
+                        <div class="absolute top-0 left-0 w-1.5 h-full" :class="entry.status === 'canceled' ? 'bg-rose-400' : 'bg-emerald-400'"></div>
+
+                        <div class="flex justify-between items-start mb-1 relative z-20">
+                            <div></div>
+                            <span class="text-[10px] font-extrabold" :class="entry.status === 'canceled' ? 'text-rose-400' : 'text-slate-300'">{{ slot }} урок</span>
                         </div>
-                        <div class="flex justify-between items-end mt-2">
-                            <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wide truncate pr-2" :title="getTeacherName(getEntry(day, slot).teacher_id)">
-                                {{ getTeacherName(getEntry(day, slot).teacher_id) }}
+
+                        <div class="font-black text-sm leading-snug line-clamp-2 mb-auto relative z-20"
+                             :class="entry.status === 'canceled' ? 'text-rose-900 line-through' : 'text-slate-900'">
+                            {{ entry.subject_name }}
+                        </div>
+
+                        <div class="flex justify-between items-end mt-2 relative z-20">
+                            <span class="text-[10px] font-bold uppercase tracking-wide truncate pr-2" :class="entry.status === 'canceled' ? 'text-rose-500' : 'text-slate-500'">
+                                {{ getTeacherName(entry.teacher_id) }}
                             </span>
-                            <!-- Показываем название кабинета вместо старого поля -->
-                            <span class="bg-slate-100 text-slate-700 px-2 py-1 rounded-md text-[10px] font-black tracking-widest shrink-0">КАБ {{ getEntry(day, slot).room_name }}</span>
+                            <span class="px-2 py-1 rounded-md text-[10px] font-black tracking-widest shrink-0" :class="entry.status === 'canceled' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-700'">
+                                КАБ {{ entry.room_name }}
+                            </span>
                         </div>
                     </div>
 
-                    <div v-else @click="!isArchived && openCreateModal(day, slot)" class="slot-empty h-full w-full">
-                        <span class="text-[10px] font-extrabold text-slate-300 absolute top-3 left-4">{{ slot }} урок</span>
-                        <span v-if="!isArchived" class="text-emerald-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity bg-emerald-50 px-4 py-2 rounded-xl text-sm shadow-sm">➕ Добавить</span>
-                    </div>
+                    <!-- Кнопка "Замена" поверх красной карточки -->
+                    <button v-if="!hasActiveEntry(day, slot) && getEntries(day, slot).length > 0 && !isArchived"
+                            @click.stop="openCreateModal(day, slot)"
+                            class="absolute bottom-3 right-3 z-30 bg-emerald-500 text-white rounded-xl px-3 py-1.5 text-xs font-black shadow-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-emerald-600 hover:scale-105">
+                        ➕ ЗАМЕНА
+                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ УРОКА -->
         <Transition name="fade">
             <div v-if="modalMode" class="fixed inset-0 modal-glass flex items-center justify-center z-[100] p-6">
                 <div class="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
                     <div class="p-8 border-b border-slate-100 flex justify-between items-center">
-                        <h3 class="text-2xl font-black text-slate-900 tracking-tight">{{ modalMode === 'edit' ? 'Редактировать урок' : 'Новый урок' }}</h3>
+                        <h3 class="text-2xl font-black text-slate-900 tracking-tight">{{ modalMode === 'edit' ? 'Редактирование' : 'Новый урок' }}</h3>
                         <button @click="modalMode = null" class="text-slate-400 hover:text-slate-900 text-xl font-bold transition-colors">✕</button>
                     </div>
 
@@ -177,16 +202,19 @@
                             </div>
                         </div>
                         <div>
-                            <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет (определяется по преподавателю)</label>
+                            <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет</label>
                             <div class="bg-slate-100/50 border border-slate-200 px-5 py-4 rounded-xl text-slate-500 font-bold text-base cursor-not-allowed">
                                 Каб. {{ form.room_name || 'Не назначен' }}
                             </div>
                         </div>
                     </div>
 
-                    <div class="p-8 border-t border-slate-100 flex justify-between items-center bg-white">
-                        <button v-if="modalMode === 'edit'" @click="deleteEntry" class="bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold py-3 px-5 rounded-2xl text-sm transition-colors">Удалить</button>
-                        <div v-else></div>
+                    <div class="p-8 border-t border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-white">
+                        <div class="flex gap-2">
+                            <button v-if="modalMode === 'edit'" @click="deleteEntry" class="bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 font-bold py-3 px-4 rounded-2xl text-xs transition-colors" title="Полностью стереть">Удалить из БД</button>
+                            <button v-if="modalMode === 'edit' && form.status === 'planned'" @click="cancelEntry" class="bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold py-3 px-5 rounded-2xl text-sm transition-colors shadow-sm">🤒 Отменить (Болезнь)</button>
+                            <button v-if="modalMode === 'edit' && form.status === 'canceled'" @click="restoreEntry" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold py-3 px-5 rounded-2xl text-sm transition-colors shadow-sm">♻️ Восстановить</button>
+                        </div>
                         <div class="flex gap-3">
                             <button @click="modalMode = null" class="px-6 py-3 text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-bold rounded-2xl transition-all">Отмена</button>
                             <button @click="saveEntry" class="btn-emerald font-extrabold py-3 px-8 rounded-2xl text-base">Сохранить</button>
@@ -196,11 +224,10 @@
             </div>
         </Transition>
 
-        <!-- АЛЕРТЫ С ОШИБКАМИ -->
         <Transition name="fade">
             <div v-if="errorMessage" class="fixed bottom-8 right-8 max-w-lg bg-rose-600 text-white p-6 rounded-3xl shadow-2xl z-[110] flex items-start gap-4">
                 <div class="flex-1">
-                    <h4 class="font-black text-base tracking-tight mb-1">Ошибка генерации</h4>
+                    <h4 class="font-black text-base tracking-tight mb-1">Ошибка</h4>
                     <p class="text-sm font-medium text-rose-100 leading-relaxed whitespace-pre-wrap">{{ errorMessage }}</p>
                 </div>
                 <button @click="errorMessage = ''" class="text-white opacity-70 hover:opacity-100 font-bold text-xl transition-all">✕</button>
@@ -221,7 +248,7 @@
                 const selectedGroupId = ref(null);
                 const selectedWeek = ref(1);
                 const isArchived = ref(false);
-                const isGenerating = ref(false); // Состояние лоадера генерации
+                const isGenerating = ref(false);
 
                 const modalMode = ref(null);
                 const form = ref({});
@@ -234,7 +261,7 @@
                 const currentGroupWeeklyHours = computed(() => currentGroup.value ? (currentGroup.value.weekly_hours || 30) : 30);
                 const currentGroupSemesterWeeks = computed(() => currentGroup.value ? (currentGroup.value.semester_weeks || 20) : 20);
 
-                const currentWeekActualHours = computed(() => schedule.value.length);
+                const currentWeekActualHours = computed(() => schedule.value.filter(e => e.status !== 'canceled').length);
                 const showSaturday = computed(() => currentGroupHasSaturday.value || schedule.value.some(e => e.day_of_week === 6));
                 const groupPlans = computed(() => plans.value.filter(p => Number(p.group_id) === Number(selectedGroupId.value)));
 
@@ -277,18 +304,15 @@
                     if (res.ok) isArchived.value = (await res.json()).is_archived;
                 };
 
-                watch(selectedGroupId, () => {
-                    if (selectedWeek.value > currentGroupSemesterWeeks.value) selectedWeek.value = currentGroupSemesterWeeks.value;
-                    else { fetchSchedule(); fetchArchiveStatus(); }
-                });
+                watch(selectedGroupId, () => { if (selectedWeek.value > currentGroupSemesterWeeks.value) selectedWeek.value = currentGroupSemesterWeeks.value; else { fetchSchedule(); fetchArchiveStatus(); } });
                 watch(selectedWeek, () => { fetchSchedule(); fetchArchiveStatus(); });
                 onMounted(async () => { await fetchData(); await fetchSchedule(); await fetchArchiveStatus(); });
 
                 const getDayName = (dayNum) => ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"][dayNum - 1];
                 const getTeacherName = (id) => teachers.value.find(t => t.id === id)?.name || `Преп. ${id}`;
-                const getEntry = (day, slot) => schedule.value.find(e => e.day_of_week === day && e.time_slot === slot);
+                const getEntries = (day, slot) => schedule.value.filter(e => e.day_of_week === day && e.time_slot === slot);
+                const hasActiveEntry = (day, slot) => getEntries(day, slot).some(e => e.status !== 'canceled');
 
-                // АВТОМАТИЧЕСКАЯ ПОДСТАНОВКА КАБИНЕТА
                 const updateRoomFromTeacher = () => {
                     const teacher = teachers.value.find(t => t.id === form.value.teacher_id);
                     if (teacher) { form.value.room_name = teacher.room_name || 'Не назначен'; }
@@ -318,7 +342,7 @@
                     form.value = {
                         week_number: selectedWeek.value, day_of_week: day, time_slot: slot,
                         teacher_id: defaultTeacher ? defaultTeacher.id : null, teacher2_id: null,
-                        group_id: Number(selectedGroupId.value), subject_name: '',
+                        group_id: Number(selectedGroupId.value), subject_name: '', status: 'planned',
                         room_name: defaultTeacher ? (defaultTeacher.room_name || 'Не назначен') : 'Не назначен'
                     };
                 };
@@ -331,32 +355,37 @@
                 };
 
                 const deleteEntry = async () => {
-                    if (!confirm('Точно удалить этот урок?')) return;
+                    if (!confirm('ВНИМАНИЕ! Это полностью сотрет урок из базы. Для реальной отмены используйте "Отменить (Болезнь)". Продолжить?')) return;
                     await fetch(`http://localhost:8000/schedule/${form.value.id}`, { method: 'DELETE' });
                     await fetchSchedule(); modalMode.value = null;
                 };
 
-                // ГЛОБАЛЬНАЯ ГЕНЕРАЦИЯ (Вызываем для всех групп сразу!)
+                const cancelEntry = async () => {
+                    await fetch(`http://localhost:8000/schedule/${form.value.id}/cancel`, { method: 'POST' });
+                    await fetchSchedule(); modalMode.value = null;
+                };
+
+                const restoreEntry = async () => {
+                    await fetch(`http://localhost:8000/schedule/${form.value.id}/restore`, { method: 'POST' });
+                    await fetchSchedule(); modalMode.value = null;
+                };
+
                 const generateScheduleAll = async () => {
-                    if (!confirm(`Запустить синхронную генерацию для ВСЕХ групп на ${selectedWeek.value} неделю?\nЭто может занять до 60 секунд.`)) return;
-
-                    isGenerating.value = true;
-                    errorMessage.value = '';
-
+                    if (!confirm(`Запустить глобальную генерацию на ВЕСЬ СЕМЕСТР для всех групп?\nЭто займет до 60 секунд.`)) return;
+                    isGenerating.value = true; errorMessage.value = '';
                     try {
-                        const res = await fetch(`http://localhost:8000/generate_schedule/?week_number=${selectedWeek.value}`, { method: 'POST' });
+                        const res = await fetch(`http://localhost:8000/generate_schedule/`, { method: 'POST' });
+                        const resData = await res.json();
                         if (res.ok) {
                             await fetchSchedule();
-                        } else {
-                            const errData = await res.json();
-                            errorMessage.value = errData.detail || "Неизвестная ошибка сервера";
+                            alert(resData.message);
                         }
-                    } catch (e) { errorMessage.value = "Ошибка связи с сервером. Возможно, превышен лимит времени (Timeout)."; }
-
+                        else { errorMessage.value = resData.detail || "Неизвестная ошибка сервера"; }
+                    } catch (e) { errorMessage.value = "Ошибка связи (Timeout)."; }
                     isGenerating.value = false;
                 };
 
-                return { groups, teachers, plans, schedule, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, getDayName, getTeacherName, getEntry, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll };
+                return { groups, teachers, plans, schedule, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, getDayName, getTeacherName, getEntries, hasActiveEntry, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll };
             }
         }).mount('#app');
     </script>

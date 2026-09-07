@@ -14,8 +14,8 @@ class Teacher(Base):
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=True)
     max_hours_per_week = Column(Integer, default=30)
     is_active = Column(Boolean, default=True)
-    on_vacation = Column(Boolean, default=False) # <--- ВЕРНУЛ ЭТО
-    is_sick = Column(Boolean, default=False)     # <--- И ЭТО
+    on_vacation = Column(Boolean, default=False)
+    is_sick = Column(Boolean, default=False)
 
     room = relationship("Room")
     course_plans_primary = relationship("CoursePlan", foreign_keys="[CoursePlan.teacher_id]", back_populates="teacher")
@@ -58,6 +58,7 @@ class ScheduleEntry(Base):
     teacher2_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
     group_id = Column(Integer, ForeignKey("groups.id"))
     subject_name = Column(String)
+    status = Column(String, default="planned") # <--- НОВАЯ ЛОГИКА (planned / canceled)
 
     group = relationship("Group", back_populates="schedule_entries")
 

@@ -6,16 +6,13 @@ class RoomBase(BaseModel):
     name: str
 
 
-class RoomCreate(RoomBase):
-    pass
+class RoomCreate(RoomBase): pass
 
 
 class RoomOut(RoomBase):
     id: int
-    name: str
 
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 
 class GroupBase(BaseModel):
@@ -26,20 +23,13 @@ class GroupBase(BaseModel):
     semester_weeks: int = 20
 
 
-class GroupCreate(GroupBase):
-    pass
+class GroupCreate(GroupBase): pass
 
 
 class GroupOut(GroupBase):
     id: int
-    number: int
-    course: int
-    has_saturday: bool
-    weekly_hours: int
-    semester_weeks: int
 
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 
 class TeacherBase(BaseModel):
@@ -51,23 +41,14 @@ class TeacherBase(BaseModel):
     is_sick: bool = False
 
 
-class TeacherCreate(TeacherBase):
-    pass
+class TeacherCreate(TeacherBase): pass
 
 
 class TeacherOut(TeacherBase):
     id: int
-    name: str
-    room_id: Optional[int] = None
-    max_hours_per_week: int
-    is_active: bool
-    on_vacation: bool
-    is_sick: bool
-    # Добавлено поле для удобства (будет заполняться на уровне БД/роута)
     room_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 
 class CoursePlanBase(BaseModel):
@@ -79,21 +60,13 @@ class CoursePlanBase(BaseModel):
     teacher2_id: Optional[int] = None
 
 
-class CoursePlanCreate(CoursePlanBase):
-    pass
+class CoursePlanCreate(CoursePlanBase): pass
 
 
 class CoursePlanOut(CoursePlanBase):
     id: int
-    subject_name: str
-    total_hours: int
-    max_weekly_hours: int
-    teacher_id: int
-    group_id: int
-    teacher2_id: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 
 class ScheduleEntryBase(BaseModel):
@@ -105,25 +78,16 @@ class ScheduleEntryBase(BaseModel):
     teacher2_id: Optional[int] = None
     group_id: int
     subject_name: str
+    status: str = "planned"  # <--- ДОБАВЛЕНО
 
 
-class ScheduleEntryCreate(ScheduleEntryBase):
-    pass
+class ScheduleEntryCreate(ScheduleEntryBase): pass
 
 
 class ScheduleEntryOut(ScheduleEntryBase):
     id: int
-    week_number: int
-    day_of_week: int
-    time_slot: int
-    room_name: str
-    teacher_id: int
-    teacher2_id: Optional[int] = None
-    group_id: int
-    subject_name: str
 
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 
 class ScheduleEntryUpdate(BaseModel):
@@ -135,9 +99,9 @@ class ScheduleEntryUpdate(BaseModel):
     teacher2_id: Optional[int] = None
     group_id: int
     subject_name: str
+    status: str = "planned"
 
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 
 class ArchivedWeekToggle(BaseModel):
@@ -150,24 +114,19 @@ class ArchivedWeekOut(BaseModel):
     week_number: int
     is_archived: bool
 
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 
-class SubjectBase(BaseModel):
-    name: str
+class SubjectBase(BaseModel): name: str
 
 
-class SubjectCreate(SubjectBase):
-    pass
+class SubjectCreate(SubjectBase): pass
 
 
 class SubjectOut(SubjectBase):
     id: int
-    name: str
 
-    class Config:
-        from_attributes = True
+    class Config: from_attributes = True
 
 
 class GenerateResponse(BaseModel):
