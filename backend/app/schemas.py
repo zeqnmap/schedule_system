@@ -39,6 +39,7 @@ class TeacherBase(BaseModel):
     is_active: bool = True
     on_vacation: bool = False
     is_sick: bool = False
+    working_days: str = "1,2,3,4,5"
 
 
 class TeacherCreate(TeacherBase): pass

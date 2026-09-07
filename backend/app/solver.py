@@ -13,6 +13,14 @@ def is_pe_subject(subject_name):
     return 'физ' in name or 'спорт' in name or 'здоров' in name
 
 
+def get_teacher_working_days(teacher) -> set[int]:
+    raw_days = getattr(teacher, "working_days", None) or "1,2,3,4,5"
+    try:
+        return {int(day.strip()) for day in str(raw_days).split(",") if 1 <= int(day.strip()) <= 6}
+    except (TypeError, ValueError):
+        return {1, 2, 3, 4, 5}
+
+
 class SubjectDemand:
     def __init__(self, plan, max_w_pairs: int, max_w_singles: int):
         self.plan = plan
@@ -113,6 +121,8 @@ def preflight_check(db: Session, groups, teachers, rooms, course_plans):
     errors = []
     for t in teachers:
         t_plans = [p for p in course_plans if p.teacher_id == t.id or p.teacher2_id == t.id]
+        if t_plans and not get_teacher_working_days(t):
+            errors.append(f"Преподаватель '{t.name}' не может работать ни в один день недели.")
         requested_weekly_hours = sum((p.max_weekly_hours or 4) for p in t_plans)
         if requested_weekly_hours > t.max_hours_per_week:
             errors.append(
@@ -203,6 +213,9 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
                     for u in [ud for ud in demands if ud.group_id == g.id and t.id in ud.teacher_ids]:
                         t_vars.append(schedule[(g.id, d, h, u.id)])
                 if t_vars: model.Add(sum(t_vars) <= 1)
+                if d + 1 not in get_teacher_working_days(t):
+                    for variable in t_vars:
+                        model.Add(variable == 0)
 
             for r in rooms:
                 r_vars = []

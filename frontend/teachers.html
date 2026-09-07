@@ -6,6 +6,8 @@
     <title>Преподаватели и Кабинеты | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="searchable-select.js"></script>
+    <script src="teachers.js" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
@@ -91,11 +93,20 @@
                         </div>
                         <div>
                             <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Закрепленный кабинет</label>
-                            <select v-model.number="newTeacher.room_id" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer">
-                                <option :value="null">-- Без кабинета --</option>
-                                <option v-for="r in availableRooms" :key="r.id" :value="r.id">Каб. {{ r.name }}</option>
-                            </select>
+                            <searchable-select v-model="newTeacher.room_id" :options="availableRooms" option-label="name"
+                                placeholder="-- Без кабинета --" search-placeholder="Найти кабинет..."
+                                :format-option="r => `Каб. ${r.name}`" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer"></searchable-select>
                         </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-3">Рабочие дни</label>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                            <label v-for="day in weekDays" :key="day.id" class="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-3 cursor-pointer hover:border-emerald-300">
+                                <input v-model="newTeacher.working_days" :value="day.id" type="checkbox" class="accent-emerald-600 w-4 h-4">
+                                <span class="text-sm font-bold text-slate-700">{{ day.name }}</span>
+                            </label>
+                        </div>
+                        <p class="text-[11px] font-semibold text-slate-400 mt-2">Solver не будет назначать занятия преподавателю в неотмеченные дни.</p>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -126,6 +137,7 @@
                                     <span class="bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2.5 py-1 rounded uppercase tracking-widest">{{ t.max_hours_per_week }} ч/нед. лимит</span>
                                     <span v-if="t.room_id" class="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-2.5 py-1 rounded uppercase tracking-widest">Каб. {{ getRoomName(t.room_id) }}</span>
                                     <span v-else class="text-[10px] text-slate-400 font-bold">Без кабинета</span>
+                                    <span class="bg-amber-50 text-amber-700 font-bold text-[10px] px-2.5 py-1 rounded uppercase tracking-widest">{{ formatWorkingDays(t.working_days) }}</span>
                                 </div>
                             </div>
                         </div>
@@ -142,91 +154,5 @@
 
     </div>
 
-    <!-- СКРИПТ VUE -->
-    <script>
-        const { createApp, ref, computed, onMounted } = Vue;
-
-        createApp({
-            setup() {
-                const rooms = ref([]);
-                const teachers = ref([]);
-
-                const newRoom = ref({ name: '' });
-                const newTeacher = ref({ name: '', room_id: null, max_hours_per_week: 30 });
-                const editingTeacherId = ref(null);
-
-                const fetchData = async () => {
-                    const [rRes, tRes] = await Promise.all([ fetch('http://localhost:8000/rooms/'), fetch('http://localhost:8000/teachers/') ]);
-                    if (rRes.ok) rooms.value = await rRes.json();
-                    if (tRes.ok) teachers.value = await tRes.json();
-                };
-
-                onMounted(fetchData);
-
-                // Вычисляемое свойство: показывает только те кабинеты, которые никем не заняты
-                // ПЛЮС кабинет, который уже закреплен за текущим редактируемым преподавателем
-                const availableRooms = computed(() => {
-                    const occupiedRoomIds = teachers.value
-                        .filter(t => t.id !== editingTeacherId.value) // Не считаем текущего препода, если редактируем
-                        .map(t => t.room_id)
-                        .filter(id => id !== null);
-
-                    return rooms.value.filter(r => !occupiedRoomIds.includes(r.id));
-                });
-
-                const getRoomName = (id) => {
-                    const room = rooms.value.find(r => r.id === id);
-                    return room ? room.name : "???";
-                };
-
-                const getRoomOccupant = (roomId) => {
-                    const teacher = teachers.value.find(t => t.room_id === roomId);
-                    return teacher ? teacher.name : null;
-                };
-
-                // СОХРАНЕНИЕ КАБИНЕТА
-                const saveRoom = async () => {
-                    const trimmedName = newRoom.value.name.trim();
-                    if (!trimmedName) return;
-                    await fetch('http://localhost:8000/rooms/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmedName }) });
-                    newRoom.value.name = '';
-                    fetchData();
-                };
-
-                const deleteRoom = async (id) => {
-                    if (!confirm('Точно удалить этот кабинет?')) return;
-                    await fetch(`http://localhost:8000/rooms/${id}`, { method: 'DELETE' });
-                    fetchData();
-                };
-
-                // СОХРАНЕНИЕ ПРЕПОДА
-                const saveTeacher = async () => {
-                    const url = editingTeacherId.value ? `http://localhost:8000/teachers/${editingTeacherId.value}` : 'http://localhost:8000/teachers/';
-                    const method = editingTeacherId.value ? 'PUT' : 'POST';
-                    await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newTeacher.value) });
-                    resetTeacherForm();
-                    fetchData();
-                };
-
-                const editTeacher = (t) => {
-                    editingTeacherId.value = t.id;
-                    newTeacher.value = { name: t.name, room_id: t.room_id, max_hours_per_week: t.max_hours_per_week };
-                };
-
-                const resetTeacherForm = () => {
-                    editingTeacherId.value = null;
-                    newTeacher.value = { name: '', room_id: null, max_hours_per_week: 30 };
-                };
-
-                const deleteTeacher = async (id) => {
-                    if (!confirm('Точно удалить преподавателя?')) return;
-                    await fetch(`http://localhost:8000/teachers/${id}`, { method: 'DELETE' });
-                    fetchData();
-                };
-
-                return { rooms, teachers, newRoom, newTeacher, editingTeacherId, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, getRoomName, getRoomOccupant };
-            }
-        }).mount('#app');
-    </script>
 </body>
 </html>

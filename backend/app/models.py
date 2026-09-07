@@ -16,6 +16,7 @@ class Teacher(Base):
     is_active = Column(Boolean, default=True)
     on_vacation = Column(Boolean, default=False)
     is_sick = Column(Boolean, default=False)
+    working_days = Column(String, default="1,2,3,4,5", nullable=False)
 
     room = relationship("Room")
     course_plans_primary = relationship("CoursePlan", foreign_keys="[CoursePlan.teacher_id]", back_populates="teacher")

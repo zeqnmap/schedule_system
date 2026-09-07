@@ -2,12 +2,15 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, text
+from sqlalchemy import or_, text, inspect
 
 from . import models, schemas, database, solver
 
 # Создание таблиц (миграции здесь лучше убрать, так как ты удалишь БД)
 models.Base.metadata.create_all(bind=database.engine)
+if "working_days" not in {column["name"] for column in inspect(database.engine).get_columns("teachers")}:
+    with database.engine.begin() as connection:
+        connection.execute(text("ALTER TABLE teachers ADD COLUMN working_days VARCHAR DEFAULT '1,2,3,4,5' NOT NULL"))
 
 app = FastAPI(title="Schedule System API")
 
@@ -312,6 +315,5 @@ def restore_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)
     db.commit()
     db.refresh(entry)
     return entry
-
 
 

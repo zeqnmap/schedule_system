@@ -6,6 +6,8 @@
     <title>Учебные планы | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="searchable-select.js"></script>
+    <script src="admin.js" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
@@ -56,18 +58,15 @@
                 <form @submit.prevent="savePlan" class="space-y-5">
                     <div>
                         <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Учебная группа</label>
-                        <select v-model.number="form.group_id" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer">
-                            <option :value="null">Выберите группу...</option>
-                            <option v-for="g in groups" :key="g.id" :value="g.id">Группа {{ g.number }}</option>
-                        </select>
+                        <searchable-select v-model="form.group_id" :options="groups" option-label="number"
+                            placeholder="Выберите группу..." search-placeholder="Найти группу..."
+                            :format-option="g => `Группа ${g.number}`" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer"></searchable-select>
                     </div>
 
                     <div>
                         <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Дисциплина</label>
-                        <select v-model="form.subject_name" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer">
-                            <option value="">Выберите предмет...</option>
-                            <option v-for="s in subjects" :key="s.id" :value="s.name">{{ s.name }}</option>
-                        </select>
+                        <searchable-select v-model="form.subject_name" :options="subjects" option-value="name" option-label="name"
+                            placeholder="Выберите предмет..." search-placeholder="Найти предмет..." required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer"></searchable-select>
                     </div>
 
                     <div>
@@ -83,18 +82,15 @@
 
                     <div>
                         <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Основной преподаватель</label>
-                        <select v-model.number="form.teacher_id" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
-                            <option :value="null">Выберите преподавателя...</option>
-                            <option v-for="t in teachers" :key="t.id" :value="t.id">{{ t.name }} (Каб. {{ t.default_room }})</option>
-                        </select>
+                        <searchable-select v-model="form.teacher_id" :options="teachers" option-label="name"
+                            placeholder="Выберите преподавателя..." search-placeholder="Найти преподавателя..."
+                            :format-option="t => `${t.name} (Каб. ${t.default_room ?? '—'})`" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
                     </div>
 
                     <div>
                         <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Второй преподаватель</label>
-                        <select v-model.number="form.teacher2_id" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
-                            <option :value="null">Нет</option>
-                            <option v-for="t in teachers" :key="t.id" :value="t.id">{{ t.name }}</option>
-                        </select>
+                        <searchable-select v-model="form.teacher2_id" :options="teachers" option-label="name"
+                            placeholder="Нет" search-placeholder="Найти преподавателя..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
                     </div>
 
                     <div class="flex gap-3 pt-4">
@@ -161,7 +157,8 @@
 
     </div>
 
-    <script>
+    <!-- Логика страницы вынесена в admin.js -->
+    <!--
         const { createApp, ref, onMounted } = Vue;
 
         createApp({
@@ -223,7 +220,7 @@
 
                 return { groups, subjects, teachers, plans, form, editingPlanId, errorMessage, savePlan, editPlan, resetForm, deletePlan, getGroupNumber, getTeacherName };
             }
-        }).mount('#app');
-    </script>
+        }).component('searchable-select', SearchableSelect).mount('#app');
+    -->
 </body>
 </html>
