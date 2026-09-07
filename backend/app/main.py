@@ -9,7 +9,7 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -103,13 +103,16 @@ def require_admin(request: Request, db: Session = Depends(database.get_db)):
 
 @app.middleware("http")
 async def protect_site(request: Request, call_next):
-    public_paths = {"/login.html", "/auth/login", "/docs", "/openapi.json", "/redoc"}
+    public_paths = {"/login.html", "/html/login.html", "/auth/login", "/docs", "/openapi.json", "/redoc"}
     public_asset = request.url.path.endswith((".js", ".css"))
     if request.url.path not in public_paths and not public_asset and not request.url.path.startswith(("/docs/", "/redoc/")):
         db = database.SessionLocal()
         try:
             user = current_user(request, db)
-            admin_pages = {"/teachers.html", "/groups_subjects.html", "/admin.html", "/progress.html", "/users.html"}
+            admin_pages = {
+                "/teachers.html", "/groups_subjects.html", "/admin.html", "/progress.html", "/users.html",
+                "/html/teachers.html", "/html/groups_subjects.html", "/html/admin.html", "/html/progress.html", "/html/users.html",
+            }
             if request.url.path in admin_pages and not user.is_admin:
                 return Response(status_code=307, headers={"Location": "/"})
             admin_only = request.url.path.startswith("/users/") or (
@@ -119,7 +122,7 @@ async def protect_site(request: Request, call_next):
                 return Response(content='{"detail":"Нужны права администратора"}', status_code=403, media_type="application/json")
         except HTTPException:
             if request.url.path.endswith(".html") or request.url.path == "/":
-                return Response(status_code=307, headers={"Location": "/login.html"})
+                return Response(status_code=307, headers={"Location": "/html/login.html"})
             return Response(content='{"detail":"Требуется авторизация"}', status_code=401, media_type="application/json")
         finally:
             db.close()
@@ -141,6 +144,19 @@ def bootstrap_admin():
 
 
 bootstrap_admin()
+
+
+@app.get("/", include_in_schema=False)
+def home_page():
+    return RedirectResponse("/html/index.html")
+
+
+@app.get("/{page_name}.html", include_in_schema=False)
+def legacy_page(page_name: str):
+    allowed_pages = {"index", "login", "groups_subjects", "teachers", "admin", "progress", "users"}
+    if page_name not in allowed_pages:
+        raise HTTPException(status_code=404, detail="Страница не найдена")
+    return RedirectResponse(f"/html/{page_name}.html")
 
 
 @app.post("/auth/login")
