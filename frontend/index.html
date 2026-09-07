@@ -6,7 +6,10 @@
     <title>Сетка расписания | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="app-shell.css">
     <script src="searchable-select.js"></script>
+    <script src="auth.js" defer></script>
+    <script src="app-nav.js" defer></script>
     <script src="index.js" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
@@ -35,11 +38,11 @@
                 <span class="text-2xl font-black tracking-tighter text-slate-900">EduSync<span class="text-slate-400 font-semibold ml-1">2026</span></span>
             </div>
             <div class="hidden lg:flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/50">
-                <a href="groups_subjects.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Справочники</a>
-                <a href="teachers.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Преподаватели</a>
-                <a href="admin.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Учебные планы</a>
-                <a href="progress.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Часы</a>
-                <a href="users.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Доступы</a>
+                <a href="groups_subjects.html" class="admin-only px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all" hidden>Справочники</a>
+                <a href="teachers.html" class="admin-only px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all" hidden>Преподаватели</a>
+                <a href="admin.html" class="admin-only px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all" hidden>Учебные планы</a>
+                <a href="progress.html" class="admin-only px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all" hidden>Часы</a>
+                <a href="users.html" class="admin-only px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all" hidden>Доступы</a>
                 <a href="index.html" class="ml-2 px-6 py-2 rounded-xl text-sm font-bold bg-white text-slate-900 shadow-sm border border-slate-200/50 transition-all">Расписание</a>
             </div>
         </div>

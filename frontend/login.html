@@ -4,18 +4,20 @@
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Вход | EduSync</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="app-shell.css">
     <script src="login.js" defer></script>
 </head>
-<body class="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-slate-900">
-    <main class="w-full max-w-md bg-white rounded-[32px] p-8 shadow-2xl">
-        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 mb-6"></div>
-        <h1 class="text-3xl font-black mb-2">Вход в EduSync</h1>
-        <p class="text-slate-500 font-medium mb-8">Доступ только для приглашённых пользователей</p>
+<body class="min-h-screen flex items-center justify-center p-6 text-slate-900">
+    <main class="relative z-10 w-full max-w-md rounded-[32px] border border-white/80 bg-white/90 p-8 shadow-[0_28px_80px_-24px_rgba(15,23,42,.38)] backdrop-blur-xl sm:p-10">
+        <div class="mb-8 flex items-center gap-3"><div class="app-brand-mark">E</div><div class="app-brand-name">EduSync<small>2026</small></div></div>
+        <p class="mb-2 text-xs font-black uppercase tracking-[0.22em] text-emerald-600">Закрытая рабочая система</p>
+        <h1 class="mb-2 text-3xl font-black tracking-tight">Вход в кабинет</h1>
+        <p class="mb-8 font-medium text-slate-500">Доступ только для приглашённых пользователей.</p>
         <form id="login-form" class="space-y-4">
             <input name="login" required autocomplete="username" placeholder="Логин" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 outline-none focus:border-emerald-500">
             <input name="password" required type="password" autocomplete="current-password" placeholder="Пароль" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 outline-none focus:border-emerald-500">
             <p id="error" class="hidden rounded-xl bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700"></p>
-            <button class="w-full rounded-2xl bg-emerald-600 py-4 font-extrabold text-white hover:bg-emerald-700">Войти</button>
+            <button class="btn-emerald w-full rounded-2xl py-4 font-extrabold hover:bg-emerald-700">Войти в EduSync</button>
         </form>
     </main>
 </body>

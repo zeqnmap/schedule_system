@@ -6,6 +6,9 @@
     <title>Преподаватели и Кабинеты | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="app-shell.css">
+    <script src="auth.js" defer></script>
+    <script src="app-nav.js" defer></script>
     <script src="searchable-select.js"></script>
     <script src="teachers.js" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -125,13 +128,13 @@
                     </div>
                 </form>
 
-                <div class="space-y-4 overflow-y-auto max-h-[600px] pr-3">
-                    <div v-for="t in teachers" :key="t.id" class="group flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 transition-all">
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 overflow-y-auto max-h-[700px] pr-3">
+                    <div v-for="t in teachers" :key="t.id" @click="editTeacher(t)" class="group relative flex flex-col gap-4 p-5 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-emerald-300 hover:shadow-md transition-all cursor-pointer">
                         <div class="flex items-center gap-4 w-full">
                             <div class="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center font-black text-slate-400 text-lg shrink-0">
                                 {{ t.name.charAt(0) }}
                             </div>
-                            <div class="flex-1 min-w-0">
+                            <div class="flex-1 min-w-0 pr-24">
                                 <h3 class="font-extrabold text-lg text-slate-900 truncate">{{ t.name }}</h3>
                                 <div class="flex items-center gap-3 mt-1 flex-wrap">
                                     <span class="bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2.5 py-1 rounded uppercase tracking-widest">{{ t.max_hours_per_week }} ч/нед. лимит</span>
@@ -141,12 +144,26 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                            <button @click="editTeacher(t)" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold px-4 py-2.5 rounded-xl text-xs transition-all border border-slate-200">Изменить</button>
-                            <button @click="deleteTeacher(t.id)" class="btn-coral font-bold px-4 py-2.5 rounded-xl text-xs">Удалить</button>
+                        <div class="border-t border-slate-100 pt-3">
+                            <div class="flex justify-between items-end mb-2">
+                                <span class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Всего в неделю</span>
+                                <span class="font-black text-base" :class="workload(t).assigned_weekly_hours > t.max_hours_per_week ? 'text-rose-600' : 'text-emerald-600'">{{ workload(t).assigned_weekly_hours }} / {{ t.max_hours_per_week }} ч</span>
+                            </div>
+                            <div class="h-2 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full transition-all" :class="workload(t).assigned_weekly_hours > t.max_hours_per_week ? 'bg-rose-500' : 'bg-emerald-500'" :style="{ width: `${Math.min(100, workload(t).assigned_weekly_hours / Math.max(1, t.max_hours_per_week) * 100)}%` }"></div></div>
+                        </div>
+                        <div v-if="workload(t).subject_loads.length" class="space-y-2">
+                            <div v-for="item in workload(t).subject_loads" :key="`${item.subject_name}-${item.group_number}`" class="rounded-xl bg-slate-50 px-3 py-2.5">
+                                <div class="flex justify-between gap-3 text-xs mb-1.5"><span class="font-extrabold text-slate-700 truncate">{{ item.subject_name }} <span class="text-slate-400">· гр. {{ item.group_number }}</span></span><span class="font-black text-emerald-700 shrink-0">{{ item.weekly_hours }} / {{ item.plan_limit }} ч</span></div>
+                                <div class="h-1.5 rounded-full bg-slate-200 overflow-hidden"><div class="h-full rounded-full bg-indigo-500" :style="{ width: `${Math.min(100, item.weekly_hours / Math.max(1, item.plan_limit) * 100)}%` }"></div></div>
+                            </div>
+                        </div>
+                        <p class="text-[10px] text-slate-400 font-semibold">Нажмите на карточку для редактирования</p>
+                        <div class="absolute top-4 right-4 flex gap-1.5">
+                            <button @click.stop="editTeacher(t)" title="Изменить" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold w-8 h-8 rounded-lg text-xs border border-slate-200">✎</button>
+                            <button @click.stop="deleteTeacher(t.id)" title="Удалить" class="btn-coral font-bold w-8 h-8 rounded-lg text-xs">×</button>
                         </div>
                     </div>
-                    <div v-if="teachers.length === 0" class="text-center text-slate-400 py-12 font-bold text-lg">Нет преподавателей.</div>
+                    <div v-if="teachers.length === 0" class="xl:col-span-2 text-center text-slate-400 py-12 font-bold text-lg">Нет преподавателей.</div>
                 </div>
             </div>
 

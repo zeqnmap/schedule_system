@@ -108,7 +108,15 @@ async def protect_site(request: Request, call_next):
     if request.url.path not in public_paths and not public_asset and not request.url.path.startswith(("/docs/", "/redoc/")):
         db = database.SessionLocal()
         try:
-            current_user(request, db)
+            user = current_user(request, db)
+            admin_pages = {"/teachers.html", "/groups_subjects.html", "/admin.html", "/progress.html", "/users.html"}
+            if request.url.path in admin_pages and not user.is_admin:
+                return Response(status_code=307, headers={"Location": "/"})
+            admin_only = request.url.path.startswith("/users/") or (
+                request.method != "GET" and request.url.path.startswith(("/rooms/", "/teachers/", "/groups/", "/subjects/", "/course_plans/"))
+            )
+            if admin_only and not user.is_admin:
+                return Response(content='{"detail":"Нужны права администратора"}', status_code=403, media_type="application/json")
         except HTTPException:
             if request.url.path.endswith(".html") or request.url.path == "/":
                 return Response(status_code=307, headers={"Location": "/login.html"})
@@ -152,7 +160,7 @@ def logout(response: Response):
 
 @app.get("/auth/me")
 def me(user: models.User = Depends(require_user)):
-    return {"login": user.login, "is_admin": user.is_admin}
+    return {"id": user.id, "login": user.login, "is_admin": user.is_admin, "is_active": user.is_active}
 
 
 @app.get("/users/", response_model=List[schemas.UserOut])
@@ -165,9 +173,11 @@ def create_user(data: schemas.UserCreate, _: models.User = Depends(require_admin
     login_name = data.login.strip()
     if not login_name or not data.password:
         raise HTTPException(status_code=400, detail="Логин и пароль обязательны")
+    if len(data.password) < 8:
+        raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 8 символов")
     if db.query(models.User).filter_by(login=login_name).first():
         raise HTTPException(status_code=409, detail="Такой логин уже существует")
-    user = models.User(login=login_name, password_hash=hash_password(data.password), is_admin=data.is_admin)
+    user = models.User(login=login_name, password_hash=hash_password(data.password), is_admin=False)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -181,6 +191,26 @@ def delete_user(user_id: int, current: models.User = Depends(require_admin), db:
     db.query(models.User).filter_by(id=user_id).delete()
     db.commit()
     return {"ok": True}
+
+
+@app.put("/users/{user_id}", response_model=schemas.UserOut)
+def update_user(user_id: int, data: schemas.UserUpdate, current: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter_by(id=user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if user.id == current.id and data.is_active is False:
+        raise HTTPException(status_code=400, detail="Нельзя отключить собственный аккаунт")
+    if data.password:
+        if len(data.password) < 8:
+            raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 8 символов")
+        user.password_hash = hash_password(data.password)
+    if data.is_active is not None:
+        user.is_active = data.is_active
+    if data.is_admin is True and user.id != current.id:
+        raise HTTPException(status_code=400, detail="Полный доступ владельца нельзя передать другому пользователю")
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 # ----------------- КАБИНЕТЫ (НОВОЕ) -----------------
@@ -256,12 +286,20 @@ def get_teachers_workload(db: Session = Depends(database.get_db)):
 
         total_semester_hours = 0
         total_weekly_hours_estimated = 0
+        subject_loads = []
 
         for p in plans:
             total_semester_hours += p.total_hours
             g = db.query(models.Group).filter(models.Group.id == p.group_id).first()
             weeks = getattr(g, 'semester_weeks', 20) or 20
-            total_weekly_hours_estimated += (p.total_hours / weeks)
+            weekly_hours = round(p.total_hours / weeks, 1)
+            total_weekly_hours_estimated += weekly_hours
+            subject_loads.append({
+                "subject_name": p.subject_name,
+                "group_number": g.number if g else p.group_id,
+                "weekly_hours": weekly_hours,
+                "plan_limit": p.max_weekly_hours or 0,
+            })
 
         result.append({
             "id": t.id,
@@ -269,7 +307,8 @@ def get_teachers_workload(db: Session = Depends(database.get_db)):
             "room_name": rooms_dict.get(t.room_id, "Без кабинета"),
             "max_hours_per_week": t.max_hours_per_week,
             "assigned_weekly_hours": round(total_weekly_hours_estimated, 1),
-            "total_semester_hours": total_semester_hours
+            "total_semester_hours": total_semester_hours,
+            "subject_loads": subject_loads,
         })
     return result
 

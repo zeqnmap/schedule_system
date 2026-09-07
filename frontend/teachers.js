@@ -4,6 +4,7 @@ createApp({
     setup() {
         const rooms = ref([]);
         const teachers = ref([]);
+        const workloads = ref([]);
         const weekDays = [
             { id: 1, name: 'Пн' }, { id: 2, name: 'Вт' }, { id: 3, name: 'Ср' },
             { id: 4, name: 'Чт' }, { id: 5, name: 'Пт' }, { id: 6, name: 'Сб' }
@@ -14,9 +15,10 @@ createApp({
         const editingTeacherId = ref(null);
 
         const fetchData = async () => {
-            const [rRes, tRes] = await Promise.all([fetch('/rooms/'), fetch('/teachers/')]);
+            const [rRes, tRes, wRes] = await Promise.all([fetch('/rooms/'), fetch('/teachers/'), fetch('/teachers-workload/')]);
             if (rRes.ok) rooms.value = await rRes.json();
             if (tRes.ok) teachers.value = await tRes.json();
+            if (wRes.ok) workloads.value = await wRes.json();
         };
         onMounted(fetchData);
 
@@ -26,6 +28,7 @@ createApp({
         });
         const getRoomName = id => rooms.value.find(r => r.id === id)?.name || '???';
         const getRoomOccupant = roomId => teachers.value.find(t => t.room_id === roomId)?.name || null;
+        const workload = teacher => workloads.value.find(item => item.id === teacher.id) || { assigned_weekly_hours: 0, max_hours_per_week: teacher.max_hours_per_week };
         const normalizeDays = days => String(days || '1,2,3,4,5').split(',').map(Number).filter(Number.isInteger);
         const formatWorkingDays = days => normalizeDays(days).map(day => weekDays.find(item => item.id === day)?.name).filter(Boolean).join(', ') || 'Дни не выбраны';
 
@@ -63,6 +66,6 @@ createApp({
             fetchData();
         };
 
-        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, getRoomName, getRoomOccupant, formatWorkingDays };
+        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, getRoomName, getRoomOccupant, formatWorkingDays, workload };
     }
 }).component('searchable-select', SearchableSelect).mount('#app');

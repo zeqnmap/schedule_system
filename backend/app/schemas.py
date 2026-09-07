@@ -146,6 +146,12 @@ class UserCreate(BaseModel):
     is_admin: bool = False
 
 
+class UserUpdate(BaseModel):
+    password: Optional[str] = None
+    is_admin: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
 class UserOut(BaseModel):
     id: int
     login: str
