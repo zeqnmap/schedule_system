@@ -3,11 +3,21 @@ import hmac
 import os
 import secrets
 import time
+import io
 from pathlib import Path
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text, inspect
 
@@ -430,6 +440,49 @@ def get_schedule(group_id: Optional[int] = None, week_number: int = 1, db: Sessi
     query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.week_number == week_number)
     if group_id: query = query.filter(models.ScheduleEntry.group_id == group_id)
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
+
+
+def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None):
+    font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
+    if not font_path:
+        raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
+    pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
+    groups = {group.id: group.number for group in db.query(models.Group).all()}
+    teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
+    query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.week_number == week_number, models.ScheduleEntry.status != "canceled")
+    if day is not None:
+        query = query.filter(models.ScheduleEntry.day_of_week == day)
+    entries = query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.group_id, models.ScheduleEntry.time_slot).all()
+    days = [day] if day else sorted({entry.day_of_week for entry in entries}) or list(range(1, 6))
+    day_names = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА"]
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=5 * mm, rightMargin=5 * mm, topMargin=10 * mm, bottomMargin=10 * mm)
+    title = ParagraphStyle("Title", fontName="ScheduleFont", fontSize=15, leading=18, alignment=1, spaceAfter=2)
+    story = []
+    for index, selected_day in enumerate(days):
+        story.extend([Paragraph("РАСПИСАНИЕ НА", title), Paragraph(f"{day_names[selected_day - 1]} | НЕДЕЛЯ {week_number}", title), Spacer(1, 4 * mm)])
+        day_entries = [item for item in entries if item.day_of_week == selected_day]
+        rows = [["№ гр", "№ ур", "Предмет", "Ауд", "Преподаватель"]]
+        for entry in day_entries:
+            name = teachers.get(entry.teacher_id, "Не назначен")
+            if entry.teacher2_id:
+                name += f" / {teachers.get(entry.teacher2_id, '')}"
+            rows.append([str(groups.get(entry.group_id, entry.group_id)), str(entry.time_slot), entry.subject_name, entry.room_name or "-", name])
+        subject_width = max([stringWidth(str(entry.subject_name or "Предмет"), "ScheduleFont", 8) + 10 * mm for entry in day_entries] or [45 * mm])
+        subject_width = min(max(subject_width, 45 * mm), 130 * mm)
+        table = Table(rows, colWidths=[18 * mm, 16 * mm, subject_width, 23 * mm, 41 * mm], repeatRows=1, hAlign="CENTER")
+        table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, -1), "ScheduleFont"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94a3b8")), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+        story.append(table)
+        if index < len(days) - 1: story.append(PageBreak())
+    document.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+@app.get("/export/schedule.pdf")
+def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    filename = f"schedule_week_{week_number}" + (f"_day_{day}" if day else "") + ".pdf"
+    return StreamingResponse(build_schedule_pdf(db, week_number, day), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 @app.post("/schedule/", response_model=schemas.ScheduleEntryOut)
 def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session = Depends(database.get_db)):
