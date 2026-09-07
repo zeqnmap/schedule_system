@@ -133,3 +133,23 @@ class SubjectOut(SubjectBase):
 class GenerateResponse(BaseModel):
     status: str
     message: str
+
+
+class LoginRequest(BaseModel):
+    login: str
+    password: str
+
+
+class UserCreate(BaseModel):
+    login: str
+    password: str
+    is_admin: bool = False
+
+
+class UserOut(BaseModel):
+    id: int
+    login: str
+    is_admin: bool
+    is_active: bool
+
+    class Config: from_attributes = True

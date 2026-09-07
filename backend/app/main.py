@@ -1,10 +1,31 @@
+import hashlib
+import hmac
+import os
+import secrets
+import time
+from pathlib import Path
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text, inspect
 
 from . import models, schemas, database, solver
+
+
+def load_env_file():
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_env_file()
 
 # Создание таблиц (миграции здесь лучше убрать, так как ты удалишь БД)
 models.Base.metadata.create_all(bind=database.engine)
@@ -17,6 +38,139 @@ app = FastAPI(title="Schedule System API")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
+
+SESSION_TTL = 60 * 60 * 12
+SESSION_SECRET = os.getenv("SESSION_SECRET", "change-this-session-secret")
+
+
+def hash_password(password: str, salt: str | None = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 210_000).hex()
+    return f"{salt}${digest}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        salt, expected = stored_hash.split("$", 1)
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 210_000).hex()
+        return hmac.compare_digest(actual, expected)
+    except ValueError:
+        return False
+
+
+def make_session(user_id: int) -> str:
+    payload = f"{user_id}:{int(time.time())}"
+    signature = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def current_user(request: Request, db: Session) -> models.User:
+    token = request.cookies.get("schedule_session", "")
+    try:
+        user_id, issued_at, signature = token.split(":", 2)
+        payload = f"{user_id}:{issued_at}"
+        expected = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected) or time.time() - int(issued_at) > SESSION_TTL:
+            raise ValueError
+        user = db.query(models.User).filter_by(id=int(user_id), is_active=True).first()
+        if not user:
+            raise ValueError
+        return user
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+
+
+def require_user(request: Request, db: Session = Depends(database.get_db)):
+    return current_user(request, db)
+
+
+def require_admin(request: Request, db: Session = Depends(database.get_db)):
+    user = current_user(request, db)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Нужны права администратора")
+    return user
+
+
+@app.middleware("http")
+async def protect_site(request: Request, call_next):
+    public_paths = {"/login.html", "/auth/login", "/docs", "/openapi.json", "/redoc"}
+    public_asset = request.url.path.endswith((".js", ".css"))
+    if request.url.path not in public_paths and not public_asset and not request.url.path.startswith(("/docs/", "/redoc/")):
+        db = database.SessionLocal()
+        try:
+            current_user(request, db)
+        except HTTPException:
+            if request.url.path.endswith(".html") or request.url.path == "/":
+                return Response(status_code=307, headers={"Location": "/login.html"})
+            return Response(content='{"detail":"Требуется авторизация"}', status_code=401, media_type="application/json")
+        finally:
+            db.close()
+    return await call_next(request)
+
+
+def bootstrap_admin():
+    db = database.SessionLocal()
+    try:
+        if db.query(models.User).count() == 0:
+            db.add(models.User(
+                login=os.getenv("ADMIN_LOGIN", "admin").strip(),
+                password_hash=hash_password(os.getenv("ADMIN_PASSWORD", "change-me-now")),
+                is_admin=True,
+            ))
+            db.commit()
+    finally:
+        db.close()
+
+
+bootstrap_admin()
+
+
+@app.post("/auth/login")
+def login(data: schemas.LoginRequest, response: Response, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter_by(login=data.login.strip(), is_active=True).first()
+    if not user or not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+    response.set_cookie("schedule_session", make_session(user.id), httponly=True, samesite="lax", max_age=SESSION_TTL)
+    return {"login": user.login, "is_admin": user.is_admin}
+
+
+@app.post("/auth/logout")
+def logout(response: Response):
+    response.delete_cookie("schedule_session")
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def me(user: models.User = Depends(require_user)):
+    return {"login": user.login, "is_admin": user.is_admin}
+
+
+@app.get("/users/", response_model=List[schemas.UserOut])
+def read_users(_: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    return db.query(models.User).order_by(models.User.login).all()
+
+
+@app.post("/users/", response_model=schemas.UserOut)
+def create_user(data: schemas.UserCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    login_name = data.login.strip()
+    if not login_name or not data.password:
+        raise HTTPException(status_code=400, detail="Логин и пароль обязательны")
+    if db.query(models.User).filter_by(login=login_name).first():
+        raise HTTPException(status_code=409, detail="Такой логин уже существует")
+    user = models.User(login=login_name, password_hash=hash_password(data.password), is_admin=data.is_admin)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/users/{user_id}")
+def delete_user(user_id: int, current: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    if user_id == current.id:
+        raise HTTPException(status_code=400, detail="Нельзя удалить текущего администратора")
+    db.query(models.User).filter_by(id=user_id).delete()
+    db.commit()
+    return {"ok": True}
 
 
 # ----------------- КАБИНЕТЫ (НОВОЕ) -----------------
@@ -317,3 +471,6 @@ def restore_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)
     return entry
 
 
+# Frontend is served by the same process, so Docker needs only one service.
+frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")

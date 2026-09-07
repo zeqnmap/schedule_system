@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Пользователи | EduSync</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="auth.js" defer></script><script src="users.js" defer></script>
+</head>
+<body class="min-h-screen bg-slate-50 p-6 text-slate-900">
+    <main id="app" class="mx-auto max-w-3xl pt-10" v-cloak>
+        <div class="mb-8 flex items-center justify-between"><div><h1 class="text-4xl font-black">Пользователи</h1><p class="mt-2 text-slate-500">Доступ к сайту выдаётся вручную</p></div><button @click="logout" class="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white">Выйти</button></div>
+        <form @submit.prevent="createUser" class="mb-8 grid gap-3 rounded-3xl bg-white p-6 shadow-sm md:grid-cols-[1fr_1fr_auto]"><input v-model="form.login" required placeholder="Новый логин" class="rounded-xl border px-4 py-3"><input v-model="form.password" required type="password" placeholder="Пароль" class="rounded-xl border px-4 py-3"><button class="rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white">Добавить</button></form>
+        <p v-if="error" class="mb-4 rounded-xl bg-rose-50 p-4 font-bold text-rose-700">{{ error }}</p>
+        <div class="space-y-3"><div v-for="user in users" :key="user.id" class="flex items-center justify-between rounded-2xl bg-white p-5 shadow-sm"><div><p class="font-black">{{ user.login }}</p><p class="text-sm text-slate-500">{{ user.is_admin ? 'Администратор' : 'Пользователь' }}</p></div><button v-if="!user.is_admin" @click="removeUser(user.id)" class="rounded-xl bg-rose-50 px-4 py-2 text-sm font-bold text-rose-700">Удалить</button></div></div>
+    </main>
+</body>
+</html>

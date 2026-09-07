@@ -2,8 +2,16 @@ version: '3.8'
 services:
   api:
     build: .
+    container_name: schedule_system
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
-      - ./backend:/app/backend  # Прокидываем код, чтобы изменения применялись без перезапуска
-      - ./schedule.db:/app/schedule.db # База данных сохраняется снаружи контейнера
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+      - ./schedule.db:/app/schedule.db
+    command: uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    environment:
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-session-secret}

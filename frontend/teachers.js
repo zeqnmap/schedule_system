@@ -14,7 +14,7 @@ createApp({
         const editingTeacherId = ref(null);
 
         const fetchData = async () => {
-            const [rRes, tRes] = await Promise.all([fetch('http://localhost:8000/rooms/'), fetch('http://localhost:8000/teachers/')]);
+            const [rRes, tRes] = await Promise.all([fetch('/rooms/'), fetch('/teachers/')]);
             if (rRes.ok) rooms.value = await rRes.json();
             if (tRes.ok) teachers.value = await tRes.json();
         };
@@ -32,18 +32,18 @@ createApp({
         const saveRoom = async () => {
             const trimmedName = newRoom.value.name.trim();
             if (!trimmedName) return;
-            await fetch('http://localhost:8000/rooms/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmedName }) });
+            await fetch('/rooms/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmedName }) });
             newRoom.value.name = '';
             fetchData();
         };
         const deleteRoom = async id => {
             if (!confirm('Точно удалить этот кабинет?')) return;
-            await fetch(`http://localhost:8000/rooms/${id}`, { method: 'DELETE' });
+            await fetch(`/rooms/${id}`, { method: 'DELETE' });
             fetchData();
         };
         const saveTeacher = async () => {
             const payload = { ...newTeacher.value, working_days: newTeacher.value.working_days.join(',') };
-            const url = editingTeacherId.value ? `http://localhost:8000/teachers/${editingTeacherId.value}` : 'http://localhost:8000/teachers/';
+            const url = editingTeacherId.value ? `/teachers/${editingTeacherId.value}` : '/teachers/';
             const method = editingTeacherId.value ? 'PUT' : 'POST';
             await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             resetTeacherForm();
@@ -59,7 +59,7 @@ createApp({
         };
         const deleteTeacher = async id => {
             if (!confirm('Точно удалить преподавателя?')) return;
-            await fetch(`http://localhost:8000/teachers/${id}`, { method: 'DELETE' });
+            await fetch(`/teachers/${id}`, { method: 'DELETE' });
             fetchData();
         };
 
