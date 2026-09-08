@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Справочники | EduSync 2026</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="../css/app-shell.css">
+    <link rel="stylesheet" href="../css/groups-subjects.css">
+    <script src="../js/auth.js" defer></script>
+    <script src="../js/app-nav.js" defer></script>
+    <script src="../js/groups_subjects.js" defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body class="text-slate-800 antialiased min-h-screen">
+
+    <nav class="fixed inset-x-0 top-0 z-50 bg-white/70 backdrop-blur-2xl border-b border-slate-200">
+        <div class="max-w-[1600px] mx-auto px-6 lg:px-10 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-[0_4px_20px_rgba(16,185,129,0.4)]"></div>
+                <span class="text-2xl font-black tracking-tighter text-slate-900">EduSync<span class="text-slate-400 font-semibold ml-1">2026</span></span>
+            </div>
+            <div class="hidden lg:flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/50">
+                <a href="groups_subjects.html" class="px-5 py-2 rounded-xl text-sm font-bold bg-white text-slate-900 shadow-sm border border-slate-200/50">Справочники</a>
+                <a href="teachers.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Преподаватели</a>
+                <a href="admin.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Учебные планы</a>
+                <a href="progress.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Часы</a>
+                <a href="index.html" class="ml-2 px-6 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 shadow-md transition-all">Расписание</a>
+            </div>
+        </div>
+    </nav>
+
+    <div id="app" v-cloak class="max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
+
+        <header class="mb-12">
+            <h1 class="text-4xl lg:text-5xl font-black text-slate-900 tracking-tight leading-tight mb-2">Справочники</h1>
+            <p class="text-lg lg:text-xl text-slate-500 font-medium">Группы, учебные дни и каталог дисциплин</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            <div class="bento-card p-8 lg:p-10 flex flex-col">
+                <div class="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
+                    <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Учебные группы</h2>
+                    <span class="bg-slate-100 text-slate-600 font-bold text-xs px-4 py-2 rounded-xl">Всего: {{ groups.length }}</span>
+                </div>
+
+                <form @submit.prevent="saveGroup" class="mb-10 space-y-5">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Группа</label>
+                            <input v-model.number="newGroup.number" type="number" required placeholder="Напр. 451" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Курс</label>
+                            <select v-model.number="newGroup.course" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg cursor-pointer">
+                                <option value="1">1 курс</option>
+                                <option value="2">2 курс</option>
+                                <option value="3">3 курс</option>
+                                <option value="4">4 курс</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Недель в сем.</label>
+                            <input v-model.number="newGroup.semester_weeks" type="number" required placeholder="Напр. 17" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg text-center">
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3 pt-2">
+                        <button type="submit" class="flex-1 btn-emerald font-extrabold text-base py-4 rounded-2xl">
+                            {{ editingGroupId ? 'Сохранить изменения' : 'Добавить группу' }}
+                        </button>
+                        <button v-if="editingGroupId" @click="resetGroupForm" type="button" class="px-6 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all">
+                            Отмена
+                        </button>
+                    </div>
+                </form>
+
+                <div class="space-y-4 overflow-y-auto max-h-[600px] pr-3">
+                    <div v-for="g in groups" :key="g.id" class="group flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 hover:shadow-md transition-all">
+                        <div>
+                            <div class="flex items-center gap-3 mb-1.5">
+                                <h3 class="font-black text-2xl text-slate-900 tracking-tight">Группа {{ g.number }}</h3>
+                                <span class="bg-slate-100 text-slate-700 font-extrabold text-[10px] px-2.5 py-1 rounded-lg uppercase tracking-widest">{{ g.course }} курс</span>
+                                <span class="bg-emerald-50 text-emerald-700 font-extrabold text-[10px] px-2.5 py-1 rounded-lg uppercase tracking-widest">{{ g.semester_weeks }} нед.</span>
+                            </div>
+                            <div class="text-xs font-bold" :class="g.has_saturday ? 'text-indigo-500' : 'text-slate-400'">
+                                {{ g.has_saturday ? '📅 6 дней (с субботой)' : '☕ 5 дней (без субботы)' }}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 w-full sm:w-auto opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button @click="toggleSaturday(g.id)" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold px-4 py-2.5 rounded-xl text-xs transition-all border border-slate-200">
+                                {{ g.has_saturday ? 'Сделать 5-дневку' : 'Сделать 6-дневку' }}
+                            </button>
+                            <button @click="editGroup(g)" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold px-4 py-2.5 rounded-xl text-xs transition-all border border-slate-200">Изменить</button>
+                            <button @click="deleteGroup(g.id)" class="btn-coral font-bold px-4 py-2.5 rounded-xl text-xs">Удалить</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bento-card p-8 lg:p-10 flex flex-col">
+                <div class="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
+                    <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Каталог дисциплин</h2>
+                    <span class="bg-slate-100 text-slate-600 font-bold text-xs px-4 py-2 rounded-xl">Всего: {{ subjects.length }}</span>
+                </div>
+
+                <form @submit.prevent="addSubject" class="mb-10 space-y-5">
+                    <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Название дисциплины</label>
+                        <input v-model="newSubject.name" type="text" required placeholder="Напр. Высшая математика" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
+                    </div>
+                    <button type="submit" class="w-full btn-emerald font-extrabold text-base py-4 rounded-2xl">Добавить в каталог</button>
+                </form>
+
+                <div class="space-y-4 overflow-y-auto max-h-[600px] pr-3">
+                    <div v-for="s in subjects" :key="s.id" class="group flex justify-between items-center p-5 rounded-2xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 transition-all">
+                        <span class="font-extrabold text-lg text-slate-800 tracking-tight">{{ s.name }}</span>
+                        <button @click="deleteSubject(s.id)" class="btn-coral font-bold px-4 py-2 rounded-xl text-xs opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">Удалить</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+</body>
+</html>

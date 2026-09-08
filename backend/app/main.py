@@ -110,8 +110,8 @@ async def protect_site(request: Request, call_next):
         try:
             user = current_user(request, db)
             admin_pages = {
-                "/teachers.html", "/groups_subjects.html", "/admin.html", "/progress.html", "/users.html",
-                "/html/teachers.html", "/html/groups_subjects.html", "/html/admin.html", "/html/progress.html", "/html/users.html",
+                "/teachers.html", "/groups_subjects.html", "/admin.html", "/progress.html", "/users.html", "/algorithm_settings.html",
+                "/html/teachers.html", "/html/groups_subjects.html", "/html/admin.html", "/html/progress.html", "/html/users.html", "/html/algorithm_settings.html",
             }
             if request.url.path in admin_pages and not user.is_admin:
                 return Response(status_code=307, headers={"Location": "/"})
@@ -153,7 +153,7 @@ def home_page():
 
 @app.get("/{page_name}.html", include_in_schema=False)
 def legacy_page(page_name: str):
-    allowed_pages = {"index", "login", "groups_subjects", "teachers", "admin", "progress", "users"}
+    allowed_pages = {"index", "login", "groups_subjects", "teachers", "admin", "progress", "users", "algorithm_settings"}
     if page_name not in allowed_pages:
         raise HTTPException(status_code=404, detail="Страница не найдена")
     return RedirectResponse(f"/html/{page_name}.html")
@@ -466,6 +466,37 @@ def get_plans_progress(group_id: Optional[int] = None, db: Session = Depends(dat
     return result
 
 
+# ----------------- НАСТРОЙКИ АЛГОРИТМА -----------------
+@app.get("/algorithm-rules/", response_model=List[schemas.AlgorithmRuleOut])
+def read_algorithm_rules(_: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    return db.query(models.AlgorithmRule).order_by(models.AlgorithmRule.subject_name, models.AlgorithmRule.course).all()
+
+
+@app.post("/algorithm-rules/", response_model=schemas.AlgorithmRuleOut)
+def create_algorithm_rule(data: schemas.AlgorithmRuleCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    if not data.subject_name.strip() or data.weekly_hours < 1:
+        raise HTTPException(status_code=400, detail="Укажите предмет и минимум 1 час в неделю")
+    if data.group_id is None and data.course is None:
+        raise HTTPException(status_code=400, detail="Выберите курс или конкретную группу")
+    if data.lesson_mode not in {"auto", "lessons", "pairs", "pair_and_lesson"}:
+        raise HTTPException(status_code=400, detail="Неизвестный режим занятий")
+    rule = models.AlgorithmRule(**data.dict(exclude={"subject_name"}), subject_name=data.subject_name.strip())
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return rule
+
+
+@app.delete("/algorithm-rules/{rule_id}")
+def delete_algorithm_rule(rule_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    rule = db.query(models.AlgorithmRule).filter_by(id=rule_id).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Правило не найдено")
+    db.delete(rule)
+    db.commit()
+    return {"ok": True}
+
+
 # ----------------- АРХИВЫ И ГЕНЕРАЦИЯ -----------------
 @app.get("/archived-weeks/status")
 def get_archive_status(group_id: int, week_number: int, db: Session = Depends(database.get_db)):
@@ -539,8 +570,41 @@ def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, _: mode
     filename = f"schedule_week_{week_number}" + (f"_day_{day}" if day else "") + ".pdf"
     return StreamingResponse(build_schedule_pdf(db, week_number, day), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
+
+def is_physical_education(subject_name: str) -> bool:
+    name = (subject_name or "").casefold()
+    return "физ" in name or "спорт" in name or "здоров" in name
+
+
+def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, exclude_entry_id: Optional[int] = None):
+    query = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.week_number == data.week_number,
+        models.ScheduleEntry.day_of_week == data.day_of_week,
+        models.ScheduleEntry.time_slot == data.time_slot,
+        models.ScheduleEntry.status != "canceled",
+    )
+    if exclude_entry_id:
+        query = query.filter(models.ScheduleEntry.id != exclude_entry_id)
+    entries = query.all()
+    for entry in entries:
+        if entry.group_id == data.group_id:
+            raise HTTPException(status_code=409, detail="У группы уже есть занятие в этот день и этот урок")
+        existing_teachers = {teacher_id for teacher_id in (entry.teacher_id, entry.teacher2_id) if teacher_id}
+        new_teachers = {teacher_id for teacher_id in (data.teacher_id, data.teacher2_id) if teacher_id}
+        if existing_teachers & new_teachers:
+            raise HTTPException(status_code=409, detail="Преподаватель уже занят в этот день и этот урок")
+        same_room = bool(data.room_name and entry.room_name and data.room_name.strip() == entry.room_name.strip() and data.room_name.strip() != "Без кабинета")
+        shared_pe = is_physical_education(data.subject_name) and is_physical_education(entry.subject_name) and not (existing_teachers & new_teachers)
+        if same_room and not shared_pe:
+            raise HTTPException(status_code=409, detail="Кабинет уже занят в этот день и этот урок")
+        if same_room and shared_pe:
+            pe_in_room = [item for item in entries if item.room_name and item.room_name.strip() == data.room_name.strip() and is_physical_education(item.subject_name)]
+            if len(pe_in_room) >= 2:
+                raise HTTPException(status_code=409, detail="В одном спортивном зале одновременно допустимы максимум две группы")
+
 @app.post("/schedule/", response_model=schemas.ScheduleEntryOut)
 def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session = Depends(database.get_db)):
+    validate_schedule_conflicts(entry_data, db)
     new_entry = models.ScheduleEntry(**entry_data.dict())
     db.add(new_entry)
     db.commit()
@@ -550,6 +614,9 @@ def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session =
 @app.put("/schedule/{entry_id}", response_model=schemas.ScheduleEntryOut)
 def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdate, db: Session = Depends(database.get_db)):
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Занятие не найдено")
+    validate_schedule_conflicts(update_data, db, exclude_entry_id=entry_id)
     for key, value in update_data.dict().items(): setattr(entry, key, value)
     db.commit()
     db.refresh(entry)

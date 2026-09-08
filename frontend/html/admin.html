@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Учебные планы | EduSync 2026</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="../css/app-shell.css">
+    <link rel="stylesheet" href="../css/admin.css">
+    <script src="../js/auth.js" defer></script>
+    <script src="../js/app-nav.js" defer></script>
+    <script src="../js/searchable-select.js"></script>
+    <script src="../js/admin.js" defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body class="text-slate-800 antialiased min-h-screen">
+
+    <nav class="fixed inset-x-0 top-0 z-50 bg-white/70 backdrop-blur-2xl border-b border-slate-200">
+        <div class="max-w-[1600px] mx-auto px-6 lg:px-10 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-[0_4px_20px_rgba(16,185,129,0.4)]"></div>
+                <span class="text-2xl font-black tracking-tighter text-slate-900">EduSync<span class="text-slate-400 font-semibold ml-1">2026</span></span>
+            </div>
+            <div class="hidden lg:flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/50">
+                <a href="groups_subjects.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Справочники</a>
+                <a href="teachers.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Преподаватели</a>
+                <a href="admin.html" class="px-5 py-2 rounded-xl text-sm font-bold bg-white text-slate-900 shadow-sm border border-slate-200/50">Учебные планы</a>
+                <a href="progress.html" class="px-5 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition-all">Часы</a>
+                <a href="index.html" class="ml-2 px-6 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 shadow-md transition-all">Расписание</a>
+            </div>
+        </div>
+    </nav>
+
+    <div id="app" v-cloak class="max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
+
+        <header class="mb-12">
+            <h1 class="text-4xl lg:text-5xl font-black text-slate-900 tracking-tight leading-tight mb-2">Учебные планы</h1>
+            <p class="text-lg lg:text-xl text-slate-500 font-medium">Связывание групп, предметов, семестровых и недельных часов</p>
+        </header>
+
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
+
+            <div class="xl:col-span-4 bento-card p-8 lg:p-10 h-max sticky top-28">
+                <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight mb-8">
+                    {{ editingPlanId ? 'Редактировать план' : 'Назначить предмет' }}
+                </h2>
+
+                <form @submit.prevent="savePlan" class="space-y-5">
+                    <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Учебная группа</label>
+                        <searchable-select v-model="form.group_id" :options="groups" option-label="number"
+                            placeholder="Выберите группу..." search-placeholder="Найти группу..."
+                            :format-option="g => `Группа ${g.number}`" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer"></searchable-select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Дисциплина</label>
+                        <searchable-select v-model="form.subject_name" :options="subjects" option-value="name" option-label="name"
+                            placeholder="Выберите предмет..." search-placeholder="Найти предмет..." required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer"></searchable-select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Часов на полугодие</label>
+                        <input v-model.number="form.total_hours" type="number" required placeholder="Напр. 70" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base">
+                    </div>
+
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Лимит (часов в неделю)</label>
+                        <input v-model.number="form.max_weekly_hours" type="number" required placeholder="Напр. 2" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base bg-white">
+                        <p class="text-[11px] font-semibold text-slate-400 mt-2 leading-relaxed">1 ч = одиночка. 2 ч = 1 пара. 4 ч = 2 пары.</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Основной преподаватель</label>
+                        <searchable-select v-model="form.teacher_id" :options="teachers" option-label="name"
+                            placeholder="Выберите преподавателя..." search-placeholder="Найти преподавателя..."
+                            :format-option="t => `${t.name} (Каб. ${t.default_room ?? '—'})`" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Второй преподаватель</label>
+                        <searchable-select v-model="form.teacher2_id" :options="teachers" option-label="name"
+                            placeholder="Нет" search-placeholder="Найти преподавателя..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
+                    </div>
+
+                    <div class="flex gap-3 pt-4">
+                        <button type="submit" class="flex-1 btn-emerald font-extrabold text-base py-4 rounded-2xl">
+                            {{ editingPlanId ? 'Сохранить изменения' : 'Связать и добавить' }}
+                        </button>
+                        <button v-if="editingPlanId" @click="resetForm" type="button" class="px-6 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all">
+                            Отмена
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="xl:col-span-8 bento-card p-8 lg:p-10">
+                <div class="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
+                    <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Назначенные дисциплины</h2>
+                    <span class="bg-slate-100 text-slate-600 font-bold text-xs px-4 py-2 rounded-xl">Записей: {{ plans.length }}</span>
+                </div>
+
+                <div class="space-y-4 overflow-y-auto max-h-[800px] pr-3">
+                    <div v-for="p in plans" :key="p.id" class="group flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 hover:shadow-md transition-all">
+
+                        <div>
+                            <div class="flex items-center gap-3 mb-2">
+                                <h3 class="font-black text-xl text-slate-900 tracking-tight">{{ p.subject_name }}</h3>
+                                <div class="flex gap-1.5">
+                                    <span class="bg-slate-100 text-slate-700 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-widest">{{ p.total_hours }} ч. всего</span>
+                                    <span class="bg-emerald-50 text-emerald-700 text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-widest">Макс. {{ p.max_weekly_hours || 4 }} ч/нед</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 text-sm font-semibold text-slate-500">
+                                <span class="bg-slate-800 text-white px-2.5 py-0.5 rounded-md text-[11px] font-bold">Гр. {{ getGroupNumber(p.group_id) }}</span>
+                                <span>{{ getTeacherName(p.teacher_id) }} <template v-if="p.teacher2_id">+ {{ getTeacherName(p.teacher2_id) }}</template></span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-2 w-full sm:w-auto opacity-100 xl:opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button @click="editPlan(p)" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold px-4 py-2.5 rounded-xl text-sm transition-all border border-slate-200">
+                                Изменить
+                            </button>
+                            <button @click="deletePlan(p.id)" class="btn-coral font-bold px-4 py-2.5 rounded-xl text-sm font-bold">
+                                Удалить
+                            </button>
+                        </div>
+
+                    </div>
+                    <div v-if="plans.length === 0" class="text-center text-slate-400 py-20 font-bold text-lg">
+                        Учебные планы еще не созданы.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <Transition name="fade">
+            <div v-if="errorMessage" class="fixed bottom-8 right-8 max-w-sm bg-rose-600 text-white p-6 rounded-3xl shadow-2xl z-50 flex items-start gap-4">
+                <div class="flex-1">
+                    <h4 class="font-black text-base tracking-tight mb-1">Ошибка</h4>
+                    <p class="text-sm font-medium text-rose-100 leading-relaxed">{{ errorMessage }}</p>
+                </div>
+                <button @click="errorMessage = ''" class="text-white opacity-70 hover:opacity-100 font-bold text-xl transition-all">✕</button>
+            </div>
+        </Transition>
+
+    </div>
+
+</body>
+</html>

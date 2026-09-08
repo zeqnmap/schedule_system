@@ -135,6 +135,25 @@ class GenerateResponse(BaseModel):
     message: str
 
 
+class AlgorithmRuleBase(BaseModel):
+    subject_name: str
+    course: Optional[int] = None
+    group_id: Optional[int] = None
+    weekly_hours: int
+    lesson_mode: str = "auto"
+    is_required: bool = True
+    is_active: bool = True
+
+
+class AlgorithmRuleCreate(AlgorithmRuleBase): pass
+
+
+class AlgorithmRuleOut(AlgorithmRuleBase):
+    id: int
+
+    class Config: from_attributes = True
+
+
 class LoginRequest(BaseModel):
     login: str
     password: str

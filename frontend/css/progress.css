@@ -1,0 +1,8 @@
+body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
+.bento-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 28px; box-shadow: 0 10px 40px -10px rgba(0,0,0,0.04); transition: transform 0.3s ease, box-shadow 0.3s ease; }
+.bento-card:hover { box-shadow: 0 20px 40px -10px rgba(0,0,0,0.07); transform: translateY(-2px); }
+.input-modern { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 16px; transition: all 0.2s ease; outline: none; }
+.input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
+.progress-thin { height: 4px; border-radius: 4px; }
+::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+[v-cloak] { display: none; }

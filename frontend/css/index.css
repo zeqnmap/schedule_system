@@ -1,0 +1,14 @@
+body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
+.bento-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 28px; box-shadow: 0 10px 40px -10px rgba(0,0,0,0.04); }
+.input-modern { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 16px; transition: all 0.2s ease; outline: none; }
+.input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
+.btn-emerald { background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; box-shadow: 0 8px 24px -6px rgba(16, 185, 129, 0.4); transition: all 0.2s ease; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
+.btn-emerald:hover { box-shadow: 0 12px 32px -6px rgba(16, 185, 129, 0.5); transform: translateY(-2px); }
+.slot-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 24px; transition: all 0.3s ease; cursor: pointer; position: absolute; overflow: hidden; width: 100%; height: 100%; }
+.slot-card:hover { box-shadow: 0 12px 30px -8px rgba(0,0,0,0.1); }
+.modal-glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+.spinner { border: 4px solid rgba(255,255,255,0.3); width: 40px; height: 40px; border-radius: 50%; border-left-color: #fff; animation: spin 1s linear infinite; }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+[v-cloak] { display: none; }

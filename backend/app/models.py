@@ -76,6 +76,20 @@ class Subject(Base):
     name = Column(String, unique=True, index=True)
 
 
+class AlgorithmRule(Base):
+    __tablename__ = "algorithm_rules"
+    id = Column(Integer, primary_key=True, index=True)
+    subject_name = Column(String, nullable=False, index=True)
+    course = Column(Integer, nullable=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=True, index=True)
+    weekly_hours = Column(Integer, nullable=False)
+    lesson_mode = Column(String, default="auto", nullable=False)
+    is_required = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    group = relationship("Group")
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)

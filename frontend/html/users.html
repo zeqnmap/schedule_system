@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Доступы | EduSync 2026</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="../css/app-shell.css">
+    <link rel="stylesheet" href="../css/users.css">
+    <script src="../js/auth.js" defer></script>
+    <script src="../js/app-nav.js" defer></script>
+    <script src="../js/users.js" defer></script>
+</head>
+<body class="min-h-screen bg-slate-50 p-6 text-slate-900">
+    <nav class="fixed inset-x-0 top-0 z-50 border-b border-slate-200/70 bg-white/80 backdrop-blur-2xl"></nav>
+    <main id="app" v-cloak class="mx-auto max-w-6xl px-6 pb-10 pt-32 lg:px-10">
+        <header class="mb-8 flex flex-col gap-5 md:flex-row md:items-end md:justify-between"><div><p class="mb-2 text-xs font-black uppercase tracking-[0.22em] text-emerald-600">Панель владельца</p><h1 class="text-4xl font-black tracking-tight md:text-5xl">Управление доступами</h1><p class="mt-2 text-slate-500">Выдавайте и отзывайте доступ к расписанию вручную.</p></div><button @click="logout" class="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-700">Выйти</button></header>
+        <section class="mb-8 grid gap-4 md:grid-cols-3"><div class="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200"><p class="text-sm font-semibold text-slate-500">Всего аккаунтов</p><p class="mt-2 text-3xl font-black">{{ users.length }}</p></div><div class="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200"><p class="text-sm font-semibold text-slate-500">Активны</p><p class="mt-2 text-3xl font-black text-emerald-600">{{ activeCount }}</p></div><div class="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200"><p class="text-sm font-semibold text-slate-500">Администраторы</p><p class="mt-2 text-3xl font-black text-indigo-600">{{ adminCount }}</p></div></section>
+        <section class="mb-8 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200"><div class="mb-5"><h2 class="text-xl font-black">Выдать новый доступ</h2><p class="mt-1 text-sm text-slate-500">Новый аккаунт получает только доступ к составлению расписания.</p></div><form @submit.prevent="createUser" class="grid gap-3 lg:grid-cols-[1fr_1fr_auto]"><input v-model.trim="form.login" required autocomplete="off" placeholder="Логин" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-emerald-500 focus:bg-white"><input v-model="form.password" required minlength="8" type="password" autocomplete="new-password" placeholder="Пароль, минимум 8 символов" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-emerald-500 focus:bg-white"><button class="rounded-xl bg-emerald-600 px-6 py-3 font-bold text-white hover:bg-emerald-700">Добавить планировщика</button></form></section>
+        <p v-if="error" class="mb-5 rounded-2xl bg-rose-50 p-4 font-bold text-rose-700">{{ error }}</p>
+        <section class="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-200"><div class="flex items-center justify-between border-b border-slate-100 px-6 py-5"><h2 class="text-xl font-black">Аккаунты</h2><button @click="load" class="text-sm font-bold text-emerald-700">Обновить</button></div><div v-if="!users.length" class="p-10 text-center font-semibold text-slate-400">Пользователей пока нет.</div><div v-for="user in users" :key="user.id" class="border-b border-slate-100 p-5 last:border-0 md:p-6"><div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div><div class="flex flex-wrap items-center gap-2"><p class="text-lg font-black">{{ user.login }}</p><span :class="user.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="rounded-full px-3 py-1 text-xs font-black">{{ user.is_active ? 'Активен' : 'Отключен' }}</span><span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-black">{{ user.is_admin ? 'Владелец' : 'Планировщик' }}</span></div><p class="mt-1 text-sm text-slate-500">{{ user.is_admin ? 'Ваш полный доступ к настройкам и данным' : 'Только составление расписания' }}</p></div><div class="flex flex-wrap gap-2"><button @click="toggleActive(user)" :disabled="user.id === currentUserId" class="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 disabled:opacity-40">{{ user.is_active ? 'Отключить' : 'Включить' }}</button><button @click="resetPassword(user)" class="rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">Сменить пароль</button><button @click="removeUser(user)" :disabled="user.id === currentUserId" class="rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-40">Удалить</button></div></div></div></section>
+    </main>
+</body>
+</html>
