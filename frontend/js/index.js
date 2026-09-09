@@ -22,6 +22,7 @@ createApp({ setup() {
     onMounted(async () => { await fetchData(); await fetchSchedule(); await fetchArchiveStatus(); });
     const getDayName = dayNum => ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'][dayNum - 1];
     const getTeacherName = id => teachers.value.find(t => t.id === id)?.name || `Преп. ${id}`;
+    const getTeacherNames = entry => [entry.teacher_id, entry.teacher2_id].filter(Boolean).map(getTeacherName).join(' / ');
     const getEntries = (day, slot) => schedule.value.filter(e => e.day_of_week === day && e.time_slot === slot);
     const hasActiveEntry = (day, slot) => getEntries(day, slot).some(e => e.status !== 'canceled');
     const curatorHourAt = (day, slot) => curatorHours.value.filter(item => (Number(item.group_id) === 0 || Number(item.group_id) === Number(selectedGroupId.value)) && item.day_of_week === day && slot >= item.time_slot && slot < item.time_slot + item.duration).sort((a, b) => Number(b.group_id || 0) - Number(a.group_id || 0))[0];
@@ -42,5 +43,5 @@ createApp({ setup() {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) { alert('Введите дату в формате ГГГГ-ММ-ДД.'); return; }
         window.open(`/export/schedule.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(selectedDate)}`, '_blank');
     };
-    return { groups, teachers, plans, schedule, curatorHours, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, getDayName, getTeacherName, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf };
+    return { groups, teachers, plans, schedule, curatorHours, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf };
 } }).component('searchable-select', SearchableSelect).mount('#app');

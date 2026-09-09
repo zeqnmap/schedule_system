@@ -131,7 +131,7 @@
 
                         <div class="flex justify-between items-end mt-2 relative z-20">
                             <span class="text-[10px] font-bold uppercase tracking-wide truncate pr-2" :class="entry.status === 'canceled' ? 'text-rose-500' : 'text-slate-500'">
-                                {{ getTeacherName(entry.teacher_id) }}
+                                {{ getTeacherNames(entry) }}
                             </span>
                             <span class="px-2 py-1 rounded-md text-[10px] font-black tracking-widest shrink-0" :class="entry.status === 'canceled' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-700'">
                                 КАБ {{ entry.room_name }}
