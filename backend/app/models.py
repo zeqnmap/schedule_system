@@ -97,8 +97,11 @@ class CuratorHour(Base):
     day_of_week = Column(Integer, nullable=False)
     time_slot = Column(Integer, nullable=False)
     duration = Column(Integer, default=1, nullable=False)
+    room_name = Column(String, nullable=True)
+    teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     group = relationship("Group")
+    teacher = relationship("Teacher")
 
 
 class User(Base):

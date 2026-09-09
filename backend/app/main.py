@@ -43,6 +43,12 @@ models.Base.metadata.create_all(bind=database.engine)
 if "working_days" not in {column["name"] for column in inspect(database.engine).get_columns("teachers")}:
     with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE teachers ADD COLUMN working_days VARCHAR DEFAULT '1,2,3,4,5' NOT NULL"))
+curator_columns = {column["name"] for column in inspect(database.engine).get_columns("curator_hours")}
+with database.engine.begin() as connection:
+    if "room_name" not in curator_columns:
+        connection.execute(text("ALTER TABLE curator_hours ADD COLUMN room_name VARCHAR"))
+    if "teacher_id" not in curator_columns:
+        connection.execute(text("ALTER TABLE curator_hours ADD COLUMN teacher_id INTEGER"))
 
 app = FastAPI(title="Schedule System API")
 
@@ -499,7 +505,7 @@ def delete_algorithm_rule(rule_id: int, _: models.User = Depends(require_admin),
 
 
 @app.get("/curator-hours/", response_model=List[schemas.CuratorHourOut])
-def read_curator_hours(_: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+def read_curator_hours(_: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
     return db.query(models.CuratorHour).filter_by(is_active=True).order_by(models.CuratorHour.group_id, models.CuratorHour.day_of_week, models.CuratorHour.time_slot).all()
 
 
@@ -509,9 +515,17 @@ def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depend
         raise HTTPException(status_code=400, detail="Выберите корректный день, урок и длительность 1 или 2 урока")
     if data.duration == 2 and data.time_slot == 12:
         raise HTTPException(status_code=400, detail="Для двух уроков нужен не последний слот")
+    group_id = data.group_id if data.group_id is not None else 0
+    if group_id != 0 and not db.query(models.Group).filter_by(id=group_id).first():
+        raise HTTPException(status_code=404, detail="Группа не найдена")
+    if group_id != 0 and data.teacher_id is None:
+        raise HTTPException(status_code=400, detail="Для группового кураторского часа выберите куратора")
+    if group_id != 0 and not (data.room_name or "").strip():
+        raise HTTPException(status_code=400, detail="Для группового кураторского часа выберите кабинет")
     for slot in range(data.time_slot, data.time_slot + data.duration):
+        conflict_groups = [0, group_id] if group_id == 0 else [group_id]
         exists = db.query(models.CuratorHour).filter(
-            models.CuratorHour.group_id == 0,
+            models.CuratorHour.group_id.in_(conflict_groups),
             models.CuratorHour.day_of_week == data.day_of_week,
             models.CuratorHour.is_active.is_(True),
             models.CuratorHour.time_slot <= slot,
@@ -519,8 +533,63 @@ def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depend
         ).first()
         if exists:
             raise HTTPException(status_code=409, detail="Этот слот уже занят кураторским часом")
-    item = models.CuratorHour(**data.dict(), group_id=0)
+        if group_id != 0:
+            same_time = db.query(models.CuratorHour).filter(
+                models.CuratorHour.group_id != group_id,
+                models.CuratorHour.group_id != 0,
+                models.CuratorHour.day_of_week == data.day_of_week,
+                models.CuratorHour.time_slot <= slot,
+                models.CuratorHour.time_slot + models.CuratorHour.duration > slot,
+                models.CuratorHour.is_active.is_(True),
+            ).all()
+            if any(item.teacher_id == data.teacher_id for item in same_time):
+                raise HTTPException(status_code=409, detail="Этот куратор уже занят в это время")
+            if any(item.room_name and data.room_name and item.room_name.strip() == data.room_name.strip() for item in same_time):
+                raise HTTPException(status_code=409, detail="Этот кабинет уже занят кураторским часом")
+    payload = data.dict(exclude={"group_id"})
+    if payload.get("room_name"):
+        payload["room_name"] = payload["room_name"].strip()
+    item = models.CuratorHour(**payload, group_id=group_id)
     db.add(item); db.commit(); db.refresh(item)
+    return item
+
+
+@app.put("/curator-hours/{item_id}", response_model=schemas.CuratorHourOut)
+def update_curator_hour(item_id: int, data: schemas.CuratorHourCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    item = db.query(models.CuratorHour).filter_by(id=item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Кураторский час не найден")
+    group_id = data.group_id if data.group_id is not None else item.group_id or 0
+    if group_id != 0 and (data.teacher_id is None or not (data.room_name or "").strip()):
+        raise HTTPException(status_code=400, detail="Для группового кураторского часа выберите куратора и кабинет")
+    for slot in range(data.time_slot, data.time_slot + data.duration):
+        exists = db.query(models.CuratorHour).filter(
+            models.CuratorHour.id != item_id,
+            models.CuratorHour.group_id.in_([0] if group_id == 0 else [group_id]),
+            models.CuratorHour.day_of_week == data.day_of_week,
+            models.CuratorHour.is_active.is_(True),
+            models.CuratorHour.time_slot <= slot,
+            models.CuratorHour.time_slot + models.CuratorHour.duration > slot,
+        ).first()
+        if exists:
+            raise HTTPException(status_code=409, detail="Этот слот уже занят кураторским часом")
+        if group_id != 0:
+            same_time = db.query(models.CuratorHour).filter(
+                models.CuratorHour.id != item_id,
+                models.CuratorHour.group_id != 0,
+                models.CuratorHour.day_of_week == data.day_of_week,
+                models.CuratorHour.time_slot <= slot,
+                models.CuratorHour.time_slot + models.CuratorHour.duration > slot,
+                models.CuratorHour.is_active.is_(True),
+            ).all()
+            if any(other.teacher_id == data.teacher_id for other in same_time):
+                raise HTTPException(status_code=409, detail="Этот куратор уже занят в это время")
+            if any(other.room_name and data.room_name and other.room_name.strip() == data.room_name.strip() for other in same_time):
+                raise HTTPException(status_code=409, detail="Этот кабинет уже занят кураторским часом")
+    for key, value in data.dict(exclude={"group_id"}).items():
+        setattr(item, key, value.strip() if key == "room_name" and value else value)
+    item.group_id = group_id
+    db.commit(); db.refresh(item)
     return item
 
 
@@ -569,6 +638,8 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
     groups = {group.id: group.number for group in db.query(models.Group).all()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
+    curator_hours = db.query(models.CuratorHour).filter_by(is_active=True).all()
+    curator_hours = db.query(models.CuratorHour).filter_by(is_active=True).all()
     query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.week_number == week_number, models.ScheduleEntry.status != "canceled")
     if day is not None:
         query = query.filter(models.ScheduleEntry.day_of_week == day)
@@ -583,6 +654,10 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
         date_line = f"ДАТА: {schedule_date.strftime('%d.%m.%Y')}" if schedule_date else ""
         story.extend([Paragraph("РАСПИСАНИЕ НА", title), Paragraph(date_line, title) if date_line else Spacer(1, 0), Paragraph(f"{day_names[selected_day - 1]} | НЕДЕЛЯ {week_number}", title), Spacer(1, 4 * mm)])
         day_entries = [item for item in entries if item.day_of_week == selected_day]
+        day_curator_hours = [item for item in curator_hours if item.day_of_week == selected_day]
+        specific_slots = {(item.day_of_week, item.time_slot) for item in day_curator_hours if item.group_id not in (0, None)}
+        day_curator_hours = [item for item in day_curator_hours if item.group_id not in (0, None) or (item.day_of_week, item.time_slot) not in specific_slots]
+        day_curator_hours = [item for item in curator_hours if item.day_of_week == selected_day]
         rows = [["№ гр", "№ ур", "Предмет", "Ауд", "Преподаватель"]]
         group_break_rows = []
         previous_group = None
@@ -594,6 +669,17 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
             if entry.teacher2_id:
                 name += f" / {teachers.get(entry.teacher2_id, '')}"
             rows.append([str(groups.get(entry.group_id, entry.group_id)), str(entry.time_slot), entry.subject_name, entry.room_name or "-", name])
+        for item in day_curator_hours:
+            group_number = groups.get(item.group_id, "Все") if item.group_id not in (0, None) else "Все"
+            rows.append([str(group_number), str(item.time_slot), "Кураторский час", item.room_name or "-", teachers.get(item.teacher_id, "Куратор не указан")])
+        rows[1:] = sorted(rows[1:], key=lambda row: (int(row[1]), str(row[0])))
+        for item in day_curator_hours:
+            group_number = groups.get(item.group_id, "Все") if item.group_id not in (0, None) else "Все"
+            rows.append([
+                str(group_number), str(item.time_slot), "Кураторский час",
+                item.room_name or "-", teachers.get(item.teacher_id, "Куратор не указан")
+            ])
+        rows[1:] = sorted(rows[1:], key=lambda row: (int(row[1]), str(row[0])))
         subject_width = max([stringWidth(str(entry.subject_name or "Предмет"), "ScheduleFont", 8) + 10 * mm for entry in day_entries] or [45 * mm])
         subject_width = min(max(subject_width, 45 * mm), 130 * mm)
         table = Table(rows, colWidths=[18 * mm, 16 * mm, subject_width, 23 * mm, 41 * mm], repeatRows=1, hAlign="CENTER")

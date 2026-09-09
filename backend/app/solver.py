@@ -156,6 +156,16 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
         if item.group_id in (0, None, group.id)
         for offset in range(item.duration)
     }
+    curator_teacher_slots = {
+        (item.teacher_id, item.day_of_week - 1, item.time_slot - 1 + offset)
+        for item in curator_hours if item.teacher_id
+        for offset in range(item.duration)
+    }
+    curator_room_slots = {
+        (item.room_name.strip(), item.day_of_week - 1, item.time_slot - 1 + offset)
+        for item in curator_hours if item.room_name and item.room_name.strip()
+        for offset in range(item.duration)
+    }
 
     model = cp_model.CpModel()
     lesson, pair, single = {}, {}, {}
@@ -255,6 +265,9 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
                     if day + 1 not in get_teacher_working_days(teacher):
                         for variable in variables:
                             model.Add(variable == 0)
+                    for group, demand in teacher_demands[teacher.id]:
+                        if day < (6 if group.has_saturday else 5) and (teacher.id, day, slot) in curator_teacher_slots:
+                            model.Add(lesson[group.id, day, slot, demand.id] == 0)
 
             for room in rooms:
                 regular, sports = [], []
@@ -266,6 +279,8 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
                         sports.append(variable)
                     else:
                         regular.append(variable)
+                    if (room.name.strip(), day, slot) in curator_room_slots:
+                        model.Add(variable == 0)
                 if regular:
                     model.Add(sum(regular + sports) <= 1)
                 elif sports:

@@ -158,6 +158,9 @@ class CuratorHourCreate(BaseModel):
     day_of_week: int
     time_slot: int
     duration: int = 1
+    group_id: Optional[int] = None
+    room_name: Optional[str] = None
+    teacher_id: Optional[int] = None
 
 
 class CuratorHourOut(CuratorHourCreate):
