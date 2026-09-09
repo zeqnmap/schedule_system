@@ -52,18 +52,26 @@ createApp({ setup() {
     const cancelEntry = async () => { await fetch(`/schedule/${form.value.id}/cancel`, { method: 'POST' }); await fetchSchedule(); modalMode.value = null; };
     const restoreEntry = async () => { await fetch(`/schedule/${form.value.id}/restore`, { method: 'POST' }); await fetchSchedule(); modalMode.value = null; };
     const generateScheduleAll = async () => { if (!confirm('Запустить глобальную генерацию на ВЕСЬ СЕМЕСТР для всех групп?\nЭто займет до 60 секунд.')) return; isGenerating.value = true; errorMessage.value = ''; try { let res = await fetch('/generate_schedule/', { method: 'POST' }); let data = await res.json(); if (!res.ok && data.detail && (data.detail.includes('НЕ ХВАТАЕТ') || data.detail.includes('ограничения несовместимы') || data.detail.includes('Математический тупик'))) { const action = confirm(data.detail + '\n\nНажмите OK, чтобы исправить автоматически безопасным режимом (без накладок), или Отмена для ручного исправления.'); if (action) { res = await fetch('/generate_schedule/?approve_adjustments=true', { method: 'POST' }); data = await res.json(); } } if (res.ok) { await fetchSchedule(); alert(data.message); } else errorMessage.value = data.detail || 'Неизвестная ошибка сервера'; } catch (e) { errorMessage.value = 'Ошибка связи (Timeout).'; } isGenerating.value = false; };
+    const normalizeExportDate = value => {
+        const iso = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+        const ru = String(value || '').trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+        return ru ? `${ru[3]}-${ru[2]}-${ru[1]}` : null;
+    };
     const exportPdf = day => {
         const today = new Date().toISOString().slice(0, 10);
-        const selectedDate = prompt('Введите дату расписания в формате ГГГГ-ММ-ДД:', today);
-        if (selectedDate === null) return;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) { alert('Введите дату в формате ГГГГ-ММ-ДД.'); return; }
+        const enteredDate = prompt('Введите дату: ДД.ММ.ГГГГ или ГГГГ-ММ-ДД', today);
+        if (enteredDate === null) return;
+        const selectedDate = normalizeExportDate(enteredDate);
+        if (!selectedDate) { alert('Введите дату в формате ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.'); return; }
         window.open(`/export/schedule.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(selectedDate)}`, '_blank');
     };
     const exportTeachersPdf = day => {
         const today = new Date().toISOString().slice(0, 10);
-        const selectedDate = prompt('Введите дату расписания в формате ГГГГ-ММ-ДД:', today);
-        if (selectedDate === null) return;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) { alert('Введите дату в формате ГГГГ-ММ-ДД.'); return; }
+        const enteredDate = prompt('Введите дату: ДД.ММ.ГГГГ или ГГГГ-ММ-ДД', today);
+        if (enteredDate === null) return;
+        const selectedDate = normalizeExportDate(enteredDate);
+        if (!selectedDate) { alert('Введите дату в формате ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.'); return; }
         window.open(`/export/teachers.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(selectedDate)}`, '_blank');
     };
     return { groups, teachers, plans, schedule, allSchedule, curatorHours, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf, exportTeachersPdf };
