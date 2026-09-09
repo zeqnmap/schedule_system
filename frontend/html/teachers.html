@@ -138,8 +138,8 @@
                             <div class="h-2 rounded-full bg-slate-100 overflow-hidden"><div class="h-full rounded-full transition-all" :class="workload(t).assigned_weekly_hours > t.max_hours_per_week ? 'bg-rose-500' : 'bg-emerald-500'" :style="{ width: `${Math.min(100, workload(t).assigned_weekly_hours / Math.max(1, t.max_hours_per_week) * 100)}%` }"></div></div>
                         </div>
                         <div v-if="workload(t).subject_loads.length" class="space-y-2">
-                            <div v-for="item in workload(t).subject_loads" :key="`${item.subject_name}-${item.group_number}`" class="rounded-xl bg-slate-50 px-3 py-2.5">
-                                <div class="flex justify-between gap-3 text-xs mb-1.5"><span class="font-extrabold text-slate-700 truncate">{{ item.subject_name }} <span class="text-slate-400">· гр. {{ item.group_number }}</span></span><span class="font-black text-emerald-700 shrink-0">{{ item.weekly_hours }} / {{ item.plan_limit }} ч</span></div>
+                            <div v-for="item in workload(t).subject_loads" :key="item.subject_name" class="rounded-xl bg-slate-50 px-3 py-2.5">
+                                <div class="flex justify-between gap-3 text-xs mb-1.5"><span class="font-extrabold text-slate-700 truncate">{{ item.subject_name }}</span><span class="font-black text-emerald-700 shrink-0">{{ item.weekly_hours }} / {{ item.plan_limit }} ч</span></div>
                                 <div class="h-1.5 rounded-full bg-slate-200 overflow-hidden"><div class="h-full rounded-full bg-indigo-500" :style="{ width: `${Math.min(100, item.weekly_hours / Math.max(1, item.plan_limit) * 100)}%` }"></div></div>
                             </div>
                         </div>

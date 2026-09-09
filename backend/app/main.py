@@ -327,7 +327,7 @@ def get_teachers_workload(db: Session = Depends(database.get_db)):
 
         total_semester_hours = 0
         total_weekly_hours_estimated = 0
-        subject_loads = []
+        subject_loads_by_name = {}
 
         for p in plans:
             total_semester_hours += p.total_hours
@@ -335,12 +335,19 @@ def get_teachers_workload(db: Session = Depends(database.get_db)):
             weeks = getattr(g, 'semester_weeks', 20) or 20
             weekly_hours = round(p.total_hours / weeks, 1)
             total_weekly_hours_estimated += weekly_hours
-            subject_loads.append({
-                "subject_name": p.subject_name,
-                "group_number": g.number if g else p.group_id,
-                "weekly_hours": weekly_hours,
-                "plan_limit": p.max_weekly_hours or 0,
+            key = (p.subject_name or "").strip()
+            item = subject_loads_by_name.setdefault(key, {
+                "subject_name": key,
+                "weekly_hours": 0,
+                "plan_limit": 0,
             })
+            item["weekly_hours"] += weekly_hours
+            item["plan_limit"] += p.max_weekly_hours or 0
+
+        subject_loads = [
+            {**item, "weekly_hours": round(item["weekly_hours"], 1)}
+            for item in sorted(subject_loads_by_name.values(), key=lambda item: item["subject_name"].casefold())
+        ]
 
         result.append({
             "id": t.id,
