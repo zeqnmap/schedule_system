@@ -28,7 +28,7 @@ createApp({ setup() {
     const curatorHourAt = (day, slot) => curatorHours.value.filter(item => (Number(item.group_id) === 0 || Number(item.group_id) === Number(selectedGroupId.value)) && item.day_of_week === day && slot >= item.time_slot && slot < item.time_slot + item.duration).sort((a, b) => Number(b.group_id || 0) - Number(a.group_id || 0))[0];
     const curatorTeacherName = hour => hour?.teacher_id ? getTeacherName(hour.teacher_id) : 'Куратор не указан';
     const updateRoomFromTeacher = () => { const teacher = teachers.value.find(t => t.id === form.value.teacher_id); if (teacher) form.value.room_name = teacher.room_name || ''; };
-    const teacherWorksOnDay = teacher => String(teacher?.working_days || '1,2,3,4,5').split(',').map(Number).includes(Number(form.value.day_of_week)) && teacher.is_active !== false && !teacher.on_vacation && !teacher.is_sick;
+    const teacherWorksOnDay = teacher => String(teacher?.working_days || '1,2,3,4,5').split(',').map(Number).includes(Number(form.value.day_of_week)) && teacher.is_active !== false && !teacher.on_vacation && !teacher.is_sick && !String(teacher?.vacation_weeks || '').split(',').map(Number).includes(Number(selectedWeek.value));
     const sameSlotEntries = computed(() => allSchedule.value.filter(entry => entry.status !== 'canceled' && entry.day_of_week === Number(form.value.day_of_week) && entry.time_slot === Number(form.value.time_slot) && entry.id !== form.value.id));
     const isPhysicalEducation = subject => /физ|спорт|здоров/i.test(subject || '');
     const teacherBusy = teacherId => sameSlotEntries.value.some(entry => [entry.teacher_id, entry.teacher2_id].includes(teacherId));

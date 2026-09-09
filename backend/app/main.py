@@ -40,9 +40,13 @@ load_env_file()
 
 # Создание таблиц (миграции здесь лучше убрать, так как ты удалишь БД)
 models.Base.metadata.create_all(bind=database.engine)
-if "working_days" not in {column["name"] for column in inspect(database.engine).get_columns("teachers")}:
+teacher_columns = {column["name"] for column in inspect(database.engine).get_columns("teachers")}
+if "working_days" not in teacher_columns:
     with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE teachers ADD COLUMN working_days VARCHAR DEFAULT '1,2,3,4,5' NOT NULL"))
+if "vacation_weeks" not in teacher_columns:
+    with database.engine.begin() as connection:
+        connection.execute(text("ALTER TABLE teachers ADD COLUMN vacation_weeks VARCHAR DEFAULT '' NOT NULL"))
 curator_columns = {column["name"] for column in inspect(database.engine).get_columns("curator_hours")}
 with database.engine.begin() as connection:
     if "room_name" not in curator_columns:
@@ -284,6 +288,20 @@ def read_teachers(skip: int = 0, limit: int = 100, db: Session = Depends(databas
 def update_teacher(teacher_id: int, teacher_data: schemas.TeacherCreate, db: Session = Depends(database.get_db)):
     teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
     for key, value in teacher_data.dict().items(): setattr(teacher, key, value)
+    db.commit()
+    db.refresh(teacher)
+    room = db.query(models.Room).filter(models.Room.id == teacher.room_id).first()
+    teacher.room_name = room.name if room else None
+    return teacher
+
+
+@app.put("/teachers/{teacher_id}/vacation-weeks", response_model=schemas.TeacherOut)
+def update_teacher_vacation_weeks(teacher_id: int, data: schemas.TeacherVacationWeeks, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Преподаватель не найден")
+    weeks = sorted({int(week) for week in data.weeks if 1 <= int(week) <= 52})
+    teacher.vacation_weeks = ",".join(map(str, weeks))
     db.commit()
     db.refresh(teacher)
     room = db.query(models.Room).filter(models.Room.id == teacher.room_id).first()
@@ -779,6 +797,14 @@ def teacher_works_on_day(teacher, day_of_week: int) -> bool:
     return day_of_week in working_days and teacher.is_active and not teacher.on_vacation and not teacher.is_sick
 
 
+def teacher_is_on_vacation(teacher, week_number: int) -> bool:
+    try:
+        vacation_weeks = {int(value.strip()) for value in (teacher.vacation_weeks or "").split(",") if value.strip()}
+    except (AttributeError, TypeError, ValueError):
+        vacation_weeks = set()
+    return week_number in vacation_weeks
+
+
 def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, exclude_entry_id: Optional[int] = None):
     teacher_ids = {teacher_id for teacher_id in (data.teacher_id, data.teacher2_id) if teacher_id}
     selected_teachers = db.query(models.Teacher).filter(models.Teacher.id.in_(teacher_ids)).all()
@@ -787,6 +813,8 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
     for teacher in selected_teachers:
         if not teacher_works_on_day(teacher, data.day_of_week):
             raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} не работает в выбранный день")
+        if teacher_is_on_vacation(teacher, data.week_number):
+            raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} находится в отпуске на этой неделе")
     blocked = db.query(models.CuratorHour).filter(
         models.CuratorHour.group_id.in_([0, data.group_id]),
         models.CuratorHour.day_of_week == data.day_of_week,

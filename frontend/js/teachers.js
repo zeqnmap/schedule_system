@@ -13,6 +13,9 @@ createApp({
         const newRoom = ref({ name: '' });
         const newTeacher = ref({ name: '', room_id: null, max_hours_per_week: 30, working_days: defaultWorkingDays });
         const editingTeacherId = ref(null);
+        const vacationEditorId = ref(null);
+        const vacationWeeks = ref([]);
+        const semesterWeekOptions = Array.from({ length: 52 }, (_, index) => index + 1);
 
         const fetchData = async () => {
             const [rRes, tRes, wRes] = await Promise.all([fetch('/rooms/'), fetch('/teachers/'), fetch('/teachers-workload/')]);
@@ -65,7 +68,20 @@ createApp({
             await fetch(`/teachers/${id}`, { method: 'DELETE' });
             fetchData();
         };
+        const normalizeVacationWeeks = weeks => String(weeks || '').split(',').map(Number).filter(Number.isInteger).sort((a, b) => a - b);
+        const openVacationEditor = teacher => {
+            vacationEditorId.value = teacher.id;
+            vacationWeeks.value = normalizeVacationWeeks(teacher.vacation_weeks);
+        };
+        const closeVacationEditor = () => { vacationEditorId.value = null; vacationWeeks.value = []; };
+        const saveVacationWeeks = async teacher => {
+            const response = await fetch(`/teachers/${teacher.id}/vacation-weeks`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weeks: vacationWeeks.value }) });
+            if (!response.ok) return;
+            const updated = await response.json();
+            teacher.vacation_weeks = updated.vacation_weeks;
+            closeVacationEditor();
+        };
 
-        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, getRoomName, getRoomOccupant, formatWorkingDays, workload };
+        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, vacationEditorId, vacationWeeks, semesterWeekOptions, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacationWeeks, getRoomName, getRoomOccupant, formatWorkingDays, workload };
     }
 }).component('searchable-select', SearchableSelect).mount('#app');

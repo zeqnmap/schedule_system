@@ -42,6 +42,18 @@ def get_teacher_working_days(teacher) -> set[int]:
     return result
 
 
+def get_teacher_vacation_weeks(teacher) -> set[int]:
+    result = set()
+    for value in str(getattr(teacher, "vacation_weeks", "") or "").split(","):
+        try:
+            week = int(value.strip())
+        except (TypeError, ValueError):
+            continue
+        if week > 0:
+            result.add(week)
+    return result
+
+
 class SubjectDemand:
     def __init__(self, plan, weekly_limit: int, mode: str, remaining: int):
         self.plan = plan
@@ -262,6 +274,9 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
                 ]
                 if variables:
                     model.Add(sum(variables) <= 1)
+                    if teacher.on_vacation or teacher.is_sick or week in get_teacher_vacation_weeks(teacher):
+                        for variable in variables:
+                            model.Add(variable == 0)
                     if day + 1 not in get_teacher_working_days(teacher):
                         for variable in variables:
                             model.Add(variable == 0)

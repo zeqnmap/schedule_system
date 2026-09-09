@@ -11,7 +11,7 @@
     <script src="../js/auth.js" defer></script>
     <script src="../js/app-nav.js" defer></script>
     <script src="../js/searchable-select.js"></script>
-    <script src="../js/teachers.js" defer></script>
+    <script src="../js/teachers.js?v=vacation-weeks-1" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body class="text-slate-800 antialiased min-h-screen">
@@ -144,7 +144,22 @@
                             </div>
                         </div>
                         <p class="text-[10px] text-slate-400 font-semibold">Нажмите на карточку для редактирования</p>
+                        <div class="rounded-2xl border border-slate-100 bg-slate-50/60 p-3" @click.stop>
+                            <div class="flex items-center justify-between gap-3">
+                                <div><p class="text-xs font-black text-slate-700">Отпуск по неделям</p><p class="text-[10px] text-slate-400">Эти недели не будут назначаться при генерации</p></div>
+                                <button v-if="vacationEditorId !== t.id" @click="openVacationEditor(t)" type="button" class="rounded-xl bg-white px-3 py-2 text-[11px] font-black text-slate-600 border border-slate-200 hover:border-emerald-300">{{ t.vacation_weeks ? 'Изменить' : 'Выбрать' }}</button>
+                            </div>
+                            <div v-if="vacationEditorId === t.id" class="mt-3">
+                                <div class="grid grid-cols-7 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                                    <label v-for="week in semesterWeekOptions" :key="week" class="flex items-center justify-center rounded-lg border px-1.5 py-1.5 text-[10px] font-black cursor-pointer transition-colors" :class="vacationWeeks.includes(week) ? 'bg-amber-400 text-white border-amber-400' : 'bg-white text-slate-500 border-slate-200 hover:border-amber-300'"><input v-model="vacationWeeks" :value="week" type="checkbox" class="sr-only"><span>{{ week }}</span></label>
+                                </div>
+                                <div class="mt-3 flex gap-2"><button @click="saveVacationWeeks(t)" type="button" class="rounded-xl bg-amber-500 px-3 py-2 text-[11px] font-black text-white hover:bg-amber-600">Сохранить отпуск</button><button @click="closeVacationEditor" type="button" class="rounded-xl bg-white px-3 py-2 text-[11px] font-black text-slate-500 border border-slate-200">Отмена</button></div>
+                            </div>
+                            <p v-else-if="t.vacation_weeks" class="mt-2 text-[10px] font-bold text-amber-700">Недели: {{ t.vacation_weeks }}</p>
+                            <p v-else class="mt-2 text-[10px] font-semibold text-slate-400">Отпуск не назначен</p>
+                        </div>
                         <div class="absolute top-4 right-4 flex gap-1.5">
+                            <button @click.stop="openVacationEditor(t)" title="Настроить отпуск" type="button" class="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-black text-amber-700 hover:bg-amber-100">Отпуск</button>
                             <button @click.stop="editTeacher(t)" title="Изменить" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold w-8 h-8 rounded-lg text-xs border border-slate-200">✎</button>
                             <button @click.stop="deleteTeacher(t.id)" title="Удалить" class="btn-coral font-bold w-8 h-8 rounded-lg text-xs">×</button>
                         </div>

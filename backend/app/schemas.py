@@ -40,6 +40,7 @@ class TeacherBase(BaseModel):
     on_vacation: bool = False
     is_sick: bool = False
     working_days: str = "1,2,3,4,5"
+    vacation_weeks: str = ""
 
 
 class TeacherCreate(TeacherBase): pass
@@ -50,6 +51,10 @@ class TeacherOut(TeacherBase):
     room_name: Optional[str] = None
 
     class Config: from_attributes = True
+
+
+class TeacherVacationWeeks(BaseModel):
+    weeks: List[int]
 
 
 class CoursePlanBase(BaseModel):
