@@ -98,6 +98,33 @@ body.dark-theme .btn-coral { background-color: rgba(225,29,72,.16); color: #fda4
 body.dark-theme .shadow-sm, body.dark-theme .shadow-md { box-shadow: 0 8px 22px rgba(0,0,0,.28) !important; }
 body.dark-theme ::-webkit-scrollbar-thumb { background: #475569; }
 
+/* Полированная тёмная палитра: убираем оставшиеся светлые поверхности Tailwind. */
+body.dark-theme .bg-white\/70, body.dark-theme .bg-white\/80, body.dark-theme .bg-white\/90,
+body.dark-theme .bg-white\/50, body.dark-theme .bg-white\/30 { background-color: rgba(17,24,39,.86) !important; }
+body.dark-theme .bg-slate-50\/50, body.dark-theme .bg-slate-100\/50 { background-color: rgba(15,23,42,.72) !important; }
+body.dark-theme .bg-emerald-50, body.dark-theme .bg-indigo-50, body.dark-theme .bg-amber-50 { background-color: rgba(16,185,129,.10) !important; }
+body.dark-theme .bg-rose-50 { background-color: rgba(225,29,72,.12) !important; }
+body.dark-theme .bg-amber-100 { background-color: rgba(245,158,11,.16) !important; }
+body.dark-theme .bg-indigo-100 { background-color: rgba(99,102,241,.16) !important; }
+body.dark-theme .bg-rose-100 { background-color: rgba(225,29,72,.18) !important; }
+body.dark-theme .hover\:bg-white:hover, body.dark-theme .hover\:bg-slate-50:hover { background-color: #1e293b !important; }
+body.dark-theme .hover\:bg-slate-100:hover { background-color: #263449 !important; }
+body.dark-theme .border-slate-50, body.dark-theme .border-slate-100 { border-color: rgba(148,163,184,.16) !important; }
+body.dark-theme .border-emerald-100, body.dark-theme .border-amber-100, body.dark-theme .border-indigo-100 { border-color: rgba(148,163,184,.22) !important; }
+body.dark-theme .text-emerald-700 { color: #6ee7b7 !important; }
+body.dark-theme .text-emerald-600 { color: #34d399 !important; }
+body.dark-theme .text-amber-800, body.dark-theme .text-amber-700 { color: #fbbf24 !important; }
+body.dark-theme .text-indigo-800, body.dark-theme .text-indigo-700 { color: #a5b4fc !important; }
+body.dark-theme .text-rose-900, body.dark-theme .text-rose-800 { color: #fda4af !important; }
+body.dark-theme .text-rose-700 { color: #fb7185 !important; }
+body.dark-theme .modal-glass { background: rgba(2,6,23,.78) !important; }
+body.dark-theme table, body.dark-theme th, body.dark-theme td { border-color: rgba(148,163,184,.18) !important; }
+body.dark-theme .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(148,163,184,.16) !important; }
+body.dark-theme .bg-slate-900 { background-color: #020617 !important; }
+body.dark-theme .text-white { color: #f8fafc !important; }
+body.dark-theme main { color: #e2e8f0; }
+body.dark-theme .app-brand-mark { box-shadow: 0 8px 28px rgba(16,185,129,.24); }
+
 @media (max-width: 1140px) {
     .app-nav { align-items: flex-start !important; }
     .app-nav-links { justify-content: flex-start; }
