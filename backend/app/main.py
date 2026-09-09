@@ -784,11 +784,115 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     return buffer
 
 
+def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None):
+    font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
+    if not font_path:
+        raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
+    pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
+    bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
+    pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
+    groups = {group.id: group.number for group in db.query(models.Group).all()}
+    teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
+    curator_hours = db.query(models.CuratorHour).filter_by(is_active=True).all()
+    query = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.week_number == week_number,
+        models.ScheduleEntry.status != "canceled",
+    )
+    if day is not None:
+        query = query.filter(models.ScheduleEntry.day_of_week == day)
+    entries = query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
+    available_days = {entry.day_of_week for entry in entries}
+    available_days.update(item.day_of_week for item in curator_hours)
+    days = [day] if day else sorted(available_days) or list(range(1, 6))
+    day_names = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА"]
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=8 * mm, rightMargin=8 * mm, topMargin=9 * mm, bottomMargin=9 * mm)
+    title = ParagraphStyle("TeachersPdfTitle", fontName="ScheduleFont", fontSize=16, leading=19, alignment=1, textColor=colors.HexColor("#0f172a"), spaceAfter=2)
+    subtitle = ParagraphStyle("TeachersPdfSubtitle", fontName="ScheduleFont", fontSize=11, leading=14, alignment=1, textColor=colors.HexColor("#475569"), spaceAfter=2)
+    story = []
+
+    for index, selected_day in enumerate(days):
+        date_line = f"ДАТА: {schedule_date.strftime('%d.%m.%Y')}" if schedule_date else ""
+        story.extend([
+            Paragraph("РАСПИСАНИЕ ПРЕПОДАВАТЕЛЕЙ", title),
+            Paragraph(date_line, subtitle) if date_line else Spacer(1, 1 * mm),
+            Paragraph(f"{day_names[selected_day - 1]}  •  НЕДЕЛЯ {week_number}", subtitle),
+            Spacer(1, 3 * mm),
+        ])
+        rows_by_teacher = {}
+        for entry in (entry for entry in entries if entry.day_of_week == selected_day):
+            for teacher_id in {teacher_id for teacher_id in (entry.teacher_id, entry.teacher2_id) if teacher_id}:
+                rows_by_teacher.setdefault(teacher_id, []).append((
+                    entry.time_slot, 0,
+                    [teachers.get(teacher_id, f"Преподаватель {teacher_id}"), str(entry.time_slot), f"Группа {groups.get(entry.group_id, entry.group_id)}", entry.subject_name or "-", entry.room_name or "-"],
+                    False,
+                ))
+        for item in (item for item in curator_hours if item.day_of_week == selected_day and item.teacher_id):
+            target_groups = [item.group_id] if item.group_id not in (0, None) else list(groups)
+            group_label = ", ".join(f"гр. {groups.get(group_id, group_id)}" for group_id in target_groups)
+            slot_label = str(item.time_slot) if item.duration == 1 else f"{item.time_slot}-{item.time_slot + item.duration - 1}"
+            rows_by_teacher.setdefault(item.teacher_id, []).append((
+                item.time_slot, 1,
+                [teachers.get(item.teacher_id, f"Преподаватель {item.teacher_id}"), slot_label, group_label, "Кураторский час", item.room_name or "-"],
+                True,
+            ))
+
+        rows = [["Преподаватель", "№ урока", "Группа", "Предмет", "Кабинет"]]
+        teacher_spans, curator_rows = [], []
+        ordered_teachers = sorted(rows_by_teacher, key=lambda teacher_id: teachers.get(teacher_id, "").casefold())
+        for teacher_index, teacher_id in enumerate(ordered_teachers):
+            teacher_rows = sorted(rows_by_teacher[teacher_id], key=lambda item: (item[0], item[1]))
+            start_row = len(rows)
+            for row_index, (_, _, row, is_curator) in enumerate(teacher_rows):
+                row[0] = teachers.get(teacher_id, f"Преподаватель {teacher_id}") if row_index == 0 else ""
+                rows.append(row)
+                if is_curator:
+                    curator_rows.append(len(rows) - 1)
+            teacher_spans.append((start_row, len(rows) - 1))
+
+        table = Table(rows, colWidths=[58 * mm, 20 * mm, 35 * mm, 100 * mm, 35 * mm], repeatRows=1, hAlign="CENTER")
+        style = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, -1), "ScheduleFont"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]
+        for teacher_index, (start_row, end_row) in enumerate(teacher_spans):
+            style.extend([
+                ("SPAN", (0, start_row), (0, end_row)),
+                ("FONTNAME", (0, start_row), (0, start_row), "ScheduleFont-Bold"),
+                ("FONTSIZE", (0, start_row), (0, start_row), 9),
+                ("BACKGROUND", (0, start_row), (0, end_row), colors.HexColor("#e8f3f1") if teacher_index % 2 == 0 else colors.HexColor("#eef2f7")),
+                ("TEXTCOLOR", (0, start_row), (0, start_row), colors.HexColor("#0f766e")),
+            ])
+        for row in curator_rows:
+            style.extend([("BACKGROUND", (1, row), (-1, row), colors.HexColor("#fff7ed")), ("TEXTCOLOR", (3, row), (3, row), colors.HexColor("#b45309"))])
+        table.setStyle(TableStyle(style))
+        story.append(table)
+        if index < len(days) - 1:
+            story.append(PageBreak())
+    document.build(story)
+    buffer.seek(0)
+    return buffer
+
+
 @app.get("/export/schedule.pdf")
 def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
     date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
     filename = f"schedule_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
     return StreamingResponse(build_schedule_pdf(db, week_number, day, schedule_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/export/teachers.pdf")
+def export_teachers_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
+    filename = f"teachers_schedule_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
+    return StreamingResponse(build_teachers_schedule_pdf(db, week_number, day, schedule_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 def is_physical_education(subject_name: str) -> bool:

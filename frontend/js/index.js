@@ -59,5 +59,12 @@ createApp({ setup() {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) { alert('Введите дату в формате ГГГГ-ММ-ДД.'); return; }
         window.open(`/export/schedule.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(selectedDate)}`, '_blank');
     };
-    return { groups, teachers, plans, schedule, allSchedule, curatorHours, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf };
+    const exportTeachersPdf = day => {
+        const today = new Date().toISOString().slice(0, 10);
+        const selectedDate = prompt('Введите дату расписания в формате ГГГГ-ММ-ДД:', today);
+        if (selectedDate === null) return;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) { alert('Введите дату в формате ГГГГ-ММ-ДД.'); return; }
+        window.open(`/export/teachers.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(selectedDate)}`, '_blank');
+    };
+    return { groups, teachers, plans, schedule, allSchedule, curatorHours, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf, exportTeachersPdf };
 } }).component('searchable-select', SearchableSelect).mount('#app');

@@ -89,7 +89,7 @@
             <div v-for="day in (showSaturday ? 6 : 5)" :key="day" class="flex flex-col gap-4">
                 <div class="flex items-center justify-between gap-2 mb-1">
                     <h2 class="font-black text-slate-400 uppercase tracking-widest text-[11px]" :class="day === 6 ? 'text-indigo-400' : ''">{{ getDayName(day) }}</h2>
-                    <button @click="exportPdf(day)" class="bg-white border border-slate-200 hover:border-emerald-400 hover:text-emerald-700 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all">PDF</button>
+                    <div class="flex items-center gap-1"><button @click="exportPdf(day)" title="PDF для групп" class="bg-white border border-slate-200 hover:border-emerald-400 hover:text-emerald-700 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all">PDF</button><button @click="exportTeachersPdf(day)" title="PDF для преподавателей" class="bg-slate-900 text-white hover:bg-emerald-600 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all">Преп.</button></div>
                 </div>
 
                 <!-- ГЛАВНЫЙ СЛОТ: Жесткая высота 130px. Все карточки внутри позиционируются абсолютно -->
