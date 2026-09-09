@@ -154,6 +154,20 @@ class AlgorithmRuleOut(AlgorithmRuleBase):
     class Config: from_attributes = True
 
 
+class CuratorHourCreate(BaseModel):
+    day_of_week: int
+    time_slot: int
+    duration: int = 1
+
+
+class CuratorHourOut(CuratorHourCreate):
+    id: int
+    group_id: Optional[int] = None
+    is_active: bool = True
+
+    class Config: from_attributes = True
+
+
 class LoginRequest(BaseModel):
     login: str
     password: str

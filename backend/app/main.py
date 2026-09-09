@@ -4,6 +4,7 @@ import os
 import secrets
 import time
 import io
+from datetime import date
 from pathlib import Path
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
@@ -497,6 +498,39 @@ def delete_algorithm_rule(rule_id: int, _: models.User = Depends(require_admin),
     return {"ok": True}
 
 
+@app.get("/curator-hours/", response_model=List[schemas.CuratorHourOut])
+def read_curator_hours(_: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    return db.query(models.CuratorHour).filter_by(is_active=True).order_by(models.CuratorHour.group_id, models.CuratorHour.day_of_week, models.CuratorHour.time_slot).all()
+
+
+@app.post("/curator-hours/", response_model=schemas.CuratorHourOut)
+def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    if not 1 <= data.day_of_week <= 6 or not 1 <= data.time_slot <= 12 or data.duration not in (1, 2):
+        raise HTTPException(status_code=400, detail="Выберите корректный день, урок и длительность 1 или 2 урока")
+    if data.duration == 2 and data.time_slot == 12:
+        raise HTTPException(status_code=400, detail="Для двух уроков нужен не последний слот")
+    for slot in range(data.time_slot, data.time_slot + data.duration):
+        exists = db.query(models.CuratorHour).filter(
+            models.CuratorHour.group_id == 0,
+            models.CuratorHour.day_of_week == data.day_of_week,
+            models.CuratorHour.is_active.is_(True),
+            models.CuratorHour.time_slot <= slot,
+            models.CuratorHour.time_slot + models.CuratorHour.duration > slot,
+        ).first()
+        if exists:
+            raise HTTPException(status_code=409, detail="Этот слот уже занят кураторским часом")
+    item = models.CuratorHour(**data.dict(), group_id=0)
+    db.add(item); db.commit(); db.refresh(item)
+    return item
+
+
+@app.delete("/curator-hours/{item_id}")
+def delete_curator_hour(item_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    item = db.query(models.CuratorHour).filter_by(id=item_id).first()
+    if not item: raise HTTPException(status_code=404, detail="Кураторский час не найден")
+    db.delete(item); db.commit(); return {"ok": True}
+
+
 # ----------------- АРХИВЫ И ГЕНЕРАЦИЯ -----------------
 @app.get("/archived-weeks/status")
 def get_archive_status(group_id: int, week_number: int, db: Session = Depends(database.get_db)):
@@ -512,9 +546,9 @@ def toggle_archive(data: schemas.ArchivedWeekToggle, db: Session = Depends(datab
     return {"is_archived": record.is_archived if record else True}
 
 @app.post("/generate_schedule/", response_model=schemas.GenerateResponse)
-def trigger_generation(db: Session = Depends(database.get_db)):
+def trigger_generation(approve_adjustments: bool = False, db: Session = Depends(database.get_db)):
     # Генерируем ВЕСЬ семестр сразу
-    success, msg = solver.trigger_global_generation(db)
+    success, msg = solver.trigger_global_generation(db, approve_adjustments=approve_adjustments)
     if not success:
         raise HTTPException(status_code=400, detail=msg)
     return {"status": "success", "message": msg}
@@ -528,7 +562,7 @@ def get_schedule(group_id: Optional[int] = None, week_number: int = 1, db: Sessi
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
 
 
-def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None):
+def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None):
     font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
     if not font_path:
         raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
@@ -546,10 +580,16 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None)
     title = ParagraphStyle("Title", fontName="ScheduleFont", fontSize=15, leading=18, alignment=1, spaceAfter=2)
     story = []
     for index, selected_day in enumerate(days):
-        story.extend([Paragraph("РАСПИСАНИЕ НА", title), Paragraph(f"{day_names[selected_day - 1]} | НЕДЕЛЯ {week_number}", title), Spacer(1, 4 * mm)])
+        date_line = f"ДАТА: {schedule_date.strftime('%d.%m.%Y')}" if schedule_date else ""
+        story.extend([Paragraph("РАСПИСАНИЕ НА", title), Paragraph(date_line, title) if date_line else Spacer(1, 0), Paragraph(f"{day_names[selected_day - 1]} | НЕДЕЛЯ {week_number}", title), Spacer(1, 4 * mm)])
         day_entries = [item for item in entries if item.day_of_week == selected_day]
         rows = [["№ гр", "№ ур", "Предмет", "Ауд", "Преподаватель"]]
+        group_break_rows = []
+        previous_group = None
         for entry in day_entries:
+            if previous_group is not None and entry.group_id != previous_group:
+                group_break_rows.append(len(rows))
+            previous_group = entry.group_id
             name = teachers.get(entry.teacher_id, "Не назначен")
             if entry.teacher2_id:
                 name += f" / {teachers.get(entry.teacher2_id, '')}"
@@ -557,7 +597,9 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None)
         subject_width = max([stringWidth(str(entry.subject_name or "Предмет"), "ScheduleFont", 8) + 10 * mm for entry in day_entries] or [45 * mm])
         subject_width = min(max(subject_width, 45 * mm), 130 * mm)
         table = Table(rows, colWidths=[18 * mm, 16 * mm, subject_width, 23 * mm, 41 * mm], repeatRows=1, hAlign="CENTER")
-        table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, -1), "ScheduleFont"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94a3b8")), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+        style = [("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, -1), "ScheduleFont"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94a3b8")), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]
+        style.extend([("LINEABOVE", (0, row), (-1, row), 2.8, colors.black) for row in group_break_rows])
+        table.setStyle(TableStyle(style))
         story.append(table)
         if index < len(days) - 1: story.append(PageBreak())
     document.build(story)
@@ -566,9 +608,10 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None)
 
 
 @app.get("/export/schedule.pdf")
-def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
-    filename = f"schedule_week_{week_number}" + (f"_day_{day}" if day else "") + ".pdf"
-    return StreamingResponse(build_schedule_pdf(db, week_number, day), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
+    filename = f"schedule_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
+    return StreamingResponse(build_schedule_pdf(db, week_number, day, schedule_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 def is_physical_education(subject_name: str) -> bool:
@@ -577,6 +620,15 @@ def is_physical_education(subject_name: str) -> bool:
 
 
 def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, exclude_entry_id: Optional[int] = None):
+    blocked = db.query(models.CuratorHour).filter(
+        models.CuratorHour.group_id.in_([0, data.group_id]),
+        models.CuratorHour.day_of_week == data.day_of_week,
+        models.CuratorHour.is_active.is_(True),
+        models.CuratorHour.time_slot <= data.time_slot,
+        models.CuratorHour.time_slot + models.CuratorHour.duration > data.time_slot,
+    ).first()
+    if blocked:
+        raise HTTPException(status_code=409, detail="Этот слот заблокирован кураторским часом")
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == data.week_number,
         models.ScheduleEntry.day_of_week == data.day_of_week,

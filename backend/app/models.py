@@ -90,6 +90,17 @@ class AlgorithmRule(Base):
     group = relationship("Group")
 
 
+class CuratorHour(Base):
+    __tablename__ = "curator_hours"
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=True, index=True)
+    day_of_week = Column(Integer, nullable=False)
+    time_slot = Column(Integer, nullable=False)
+    duration = Column(Integer, default=1, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    group = relationship("Group")
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
