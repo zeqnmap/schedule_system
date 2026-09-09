@@ -181,20 +181,21 @@
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Преподаватель 1</label>
-                                <searchable-select v-model="form.teacher_id" :options="teachers" option-label="name"
+                                <searchable-select v-model="form.teacher_id" :options="availableTeachers" option-label="name"
                                     @change="updateRoomFromTeacher" required placeholder="Выберите преподавателя..." search-placeholder="Найти преподавателя..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
                             </div>
                             <div>
                                 <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Преподаватель 2</label>
-                                <searchable-select v-model="form.teacher2_id" :options="teachers" option-label="name"
+                                <searchable-select v-model="form.teacher2_id" :options="availableTeachers2" option-label="name"
                                     placeholder="--- Нет ---" search-placeholder="Найти преподавателя..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
                             </div>
                         </div>
                         <div>
                             <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет</label>
-                            <div class="bg-slate-100/50 border border-slate-200 px-5 py-4 rounded-xl text-slate-500 font-bold text-base cursor-not-allowed">
-                                Каб. {{ form.room_name || 'Не назначен' }}
-                            </div>
+                            <select v-model="form.room_name" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer" required>
+                                <option value="">Выберите свободный кабинет</option>
+                                <option v-for="room in availableRooms" :key="room.name" :value="room.name">Каб. {{ room.name }}</option>
+                            </select>
                         </div>
                     </div>
 

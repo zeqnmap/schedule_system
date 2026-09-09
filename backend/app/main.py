@@ -771,7 +771,22 @@ def is_physical_education(subject_name: str) -> bool:
     return "физ" in name or "спорт" in name or "здоров" in name
 
 
+def teacher_works_on_day(teacher, day_of_week: int) -> bool:
+    try:
+        working_days = {int(value.strip()) for value in (teacher.working_days or "1,2,3,4,5").split(",")}
+    except (AttributeError, TypeError, ValueError):
+        working_days = {1, 2, 3, 4, 5}
+    return day_of_week in working_days and teacher.is_active and not teacher.on_vacation and not teacher.is_sick
+
+
 def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, exclude_entry_id: Optional[int] = None):
+    teacher_ids = {teacher_id for teacher_id in (data.teacher_id, data.teacher2_id) if teacher_id}
+    selected_teachers = db.query(models.Teacher).filter(models.Teacher.id.in_(teacher_ids)).all()
+    if len(selected_teachers) != len(teacher_ids):
+        raise HTTPException(status_code=400, detail="Выбранный преподаватель не найден")
+    for teacher in selected_teachers:
+        if not teacher_works_on_day(teacher, data.day_of_week):
+            raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} не работает в выбранный день")
     blocked = db.query(models.CuratorHour).filter(
         models.CuratorHour.group_id.in_([0, data.group_id]),
         models.CuratorHour.day_of_week == data.day_of_week,

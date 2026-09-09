@@ -6,10 +6,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="../css/app-shell.css">
     <script src="../js/login.js" defer></script>
+    <script src="../js/app-nav.js" defer></script>
 </head>
 <body class="min-h-screen flex items-center justify-center p-6 text-slate-900">
     <main class="relative z-10 w-full max-w-md rounded-[32px] border border-white/80 bg-white/90 p-8 shadow-[0_28px_80px_-24px_rgba(15,23,42,.38)] backdrop-blur-xl sm:p-10">
-        <div class="mb-8 flex items-center gap-3"><div class="app-brand-mark">E</div><div class="app-brand-name">EduSync<small>2026</small></div></div>
+        <div class="mb-8 flex items-center justify-between gap-3"><div class="flex items-center gap-3"><div class="app-brand-mark">E</div><div class="app-brand-name">EduSync<small>2026</small></div></div><button type="button" class="theme-toggle" data-theme-toggle aria-label="Переключить тему" title="Переключить тему"><span class="theme-toggle-icon theme-toggle-sun">☼</span><span class="theme-toggle-track"><span class="theme-toggle-thumb"></span></span><span class="theme-toggle-icon theme-toggle-moon">☾</span></button></div>
         <p class="mb-2 text-xs font-black uppercase tracking-[0.22em] text-emerald-600">Закрытая рабочая система</p>
         <h1 class="mb-2 text-3xl font-black tracking-tight">Вход в кабинет</h1>
         <p class="mb-8 font-medium text-slate-500">Доступ только для приглашённых пользователей.</p>
