@@ -636,58 +636,124 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     if not font_path:
         raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
     pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
-    groups = {group.id: group.number for group in db.query(models.Group).all()}
+    bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
+    pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
+    group_numbers = {group.id: group.number for group in db.query(models.Group).all()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
     curator_hours = db.query(models.CuratorHour).filter_by(is_active=True).all()
-    curator_hours = db.query(models.CuratorHour).filter_by(is_active=True).all()
-    query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.week_number == week_number, models.ScheduleEntry.status != "canceled")
+    query = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.week_number == week_number,
+        models.ScheduleEntry.status != "canceled",
+    )
     if day is not None:
         query = query.filter(models.ScheduleEntry.day_of_week == day)
-    entries = query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.group_id, models.ScheduleEntry.time_slot).all()
-    days = [day] if day else sorted({entry.day_of_week for entry in entries}) or list(range(1, 6))
+    entries = query.order_by(
+        models.ScheduleEntry.day_of_week,
+        models.ScheduleEntry.group_id,
+        models.ScheduleEntry.time_slot,
+    ).all()
+    available_days = {entry.day_of_week for entry in entries}
+    available_days.update(item.day_of_week for item in curator_hours)
+    days = [day] if day else sorted(available_days) or list(range(1, 6))
     day_names = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА"]
     buffer = io.BytesIO()
-    document = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=5 * mm, rightMargin=5 * mm, topMargin=10 * mm, bottomMargin=10 * mm)
-    title = ParagraphStyle("Title", fontName="ScheduleFont", fontSize=15, leading=18, alignment=1, spaceAfter=2)
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=8 * mm,
+        rightMargin=8 * mm,
+        topMargin=9 * mm,
+        bottomMargin=9 * mm,
+    )
+    title = ParagraphStyle("PdfTitle", fontName="ScheduleFont", fontSize=16, leading=19, alignment=1, textColor=colors.HexColor("#0f172a"), spaceAfter=2)
+    subtitle = ParagraphStyle("PdfSubtitle", fontName="ScheduleFont", fontSize=11, leading=14, alignment=1, textColor=colors.HexColor("#475569"), spaceAfter=2)
     story = []
+
     for index, selected_day in enumerate(days):
         date_line = f"ДАТА: {schedule_date.strftime('%d.%m.%Y')}" if schedule_date else ""
-        story.extend([Paragraph("РАСПИСАНИЕ НА", title), Paragraph(date_line, title) if date_line else Spacer(1, 0), Paragraph(f"{day_names[selected_day - 1]} | НЕДЕЛЯ {week_number}", title), Spacer(1, 4 * mm)])
-        day_entries = [item for item in entries if item.day_of_week == selected_day]
-        day_curator_hours = [item for item in curator_hours if item.day_of_week == selected_day]
-        specific_slots = {(item.day_of_week, item.time_slot) for item in day_curator_hours if item.group_id not in (0, None)}
-        day_curator_hours = [item for item in day_curator_hours if item.group_id not in (0, None) or (item.day_of_week, item.time_slot) not in specific_slots]
-        day_curator_hours = [item for item in curator_hours if item.day_of_week == selected_day]
-        rows = [["№ гр", "№ ур", "Предмет", "Ауд", "Преподаватель"]]
-        group_break_rows = []
-        previous_group = None
+        story.extend([
+            Paragraph("РАСПИСАНИЕ ЗАНЯТИЙ", title),
+            Paragraph(date_line, subtitle) if date_line else Spacer(1, 1 * mm),
+            Paragraph(f"{day_names[selected_day - 1]}  •  НЕДЕЛЯ {week_number}", subtitle),
+            Spacer(1, 3 * mm),
+        ])
+
+        day_entries = [entry for entry in entries if entry.day_of_week == selected_day]
+        day_curators = [item for item in curator_hours if item.day_of_week == selected_day]
+        specific_slots = {
+            (item.group_id, item.time_slot + offset)
+            for item in day_curators
+            if item.group_id not in (0, None)
+            for offset in range(item.duration)
+        }
+        rows_by_group = {}
+
         for entry in day_entries:
-            if previous_group is not None and entry.group_id != previous_group:
-                group_break_rows.append(len(rows))
-            previous_group = entry.group_id
-            name = teachers.get(entry.teacher_id, "Не назначен")
+            teacher_name = teachers.get(entry.teacher_id, "Не назначен")
             if entry.teacher2_id:
-                name += f" / {teachers.get(entry.teacher2_id, '')}"
-            rows.append([str(groups.get(entry.group_id, entry.group_id)), str(entry.time_slot), entry.subject_name, entry.room_name or "-", name])
-        for item in day_curator_hours:
-            group_number = groups.get(item.group_id, "Все") if item.group_id not in (0, None) else "Все"
-            rows.append([str(group_number), str(item.time_slot), "Кураторский час", item.room_name or "-", teachers.get(item.teacher_id, "Куратор не указан")])
-        rows[1:] = sorted(rows[1:], key=lambda row: (int(row[1]), str(row[0])))
-        for item in day_curator_hours:
-            group_number = groups.get(item.group_id, "Все") if item.group_id not in (0, None) else "Все"
-            rows.append([
-                str(group_number), str(item.time_slot), "Кураторский час",
-                item.room_name or "-", teachers.get(item.teacher_id, "Куратор не указан")
-            ])
-        rows[1:] = sorted(rows[1:], key=lambda row: (int(row[1]), str(row[0])))
+                teacher_name += f" / {teachers.get(entry.teacher2_id, '')}"
+            rows_by_group.setdefault(entry.group_id, []).append((
+                entry.time_slot,
+                0,
+                [str(group_numbers.get(entry.group_id, entry.group_id)), str(entry.time_slot), entry.subject_name or "-", entry.room_name or "-", teacher_name],
+                False,
+            ))
+
+        for item in day_curators:
+            target_groups = [item.group_id] if item.group_id not in (0, None) else [group_id for group_id in group_numbers if (group_id, item.time_slot) not in specific_slots]
+            for group_id in target_groups:
+                slot_label = str(item.time_slot) if item.duration == 1 else f"{item.time_slot}-{item.time_slot + item.duration - 1}"
+                rows_by_group.setdefault(group_id, []).append((
+                    item.time_slot,
+                    1,
+                    [str(group_numbers.get(group_id, group_id)), slot_label, "Кураторский час", item.room_name or "-", teachers.get(item.teacher_id, "Куратор не указан")],
+                    True,
+                ))
+
+        rows = [["№ группы", "№ урока", "Предмет", "Кабинет", "Преподаватель"]]
+        group_spans = []
+        curator_rows = []
+        ordered_groups = sorted(rows_by_group, key=lambda group_id: (int(group_numbers.get(group_id, group_id)), int(group_id)))
+        for group_index, group_id in enumerate(ordered_groups):
+            group_rows = sorted(rows_by_group[group_id], key=lambda item: (item[0], item[1]))
+            group_start = len(rows)
+            for row_index, (slot, kind, row, is_curator) in enumerate(group_rows):
+                # Одна объединённая ячейка на весь блок группы вместо повторения номера.
+                row[0] = str(group_numbers.get(group_id, group_id)) if row_index == 0 else ""
+                rows.append(row)
+                if is_curator:
+                    curator_rows.append(len(rows) - 1)
+            group_spans.append((group_start, len(rows) - 1))
+
         subject_width = max([stringWidth(str(entry.subject_name or "Предмет"), "ScheduleFont", 8) + 10 * mm for entry in day_entries] or [45 * mm])
-        subject_width = min(max(subject_width, 45 * mm), 130 * mm)
-        table = Table(rows, colWidths=[18 * mm, 16 * mm, subject_width, 23 * mm, 41 * mm], repeatRows=1, hAlign="CENTER")
-        style = [("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, -1), "ScheduleFont"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94a3b8")), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]), ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]
-        style.extend([("LINEABOVE", (0, row), (-1, row), 2.8, colors.black) for row in group_break_rows])
+        subject_width = min(max(subject_width, 45 * mm), 125 * mm)
+        table = Table(rows, colWidths=[23 * mm, 20 * mm, subject_width, 27 * mm, 52 * mm], repeatRows=1, hAlign="CENTER")
+        style = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, -1), "ScheduleFont"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]
+        for group_index, (start_row, end_row) in enumerate(group_spans):
+            style.append(("SPAN", (0, start_row), (0, end_row)))
+            style.append(("FONTNAME", (0, start_row), (0, start_row), "ScheduleFont-Bold"))
+            style.append(("FONTSIZE", (0, start_row), (0, start_row), 10))
+            style.append(("BACKGROUND", (0, start_row), (0, end_row), colors.HexColor("#e8f3f1") if group_index % 2 == 0 else colors.HexColor("#eef2f7")))
+            style.append(("TEXTCOLOR", (0, start_row), (0, start_row), colors.HexColor("#0f766e")))
+        for row in curator_rows:
+            # Не перекрываем цельный фон объединённой ячейки группы.
+            style.append(("BACKGROUND", (1, row), (-1, row), colors.HexColor("#fff7ed")))
+            style.append(("TEXTCOLOR", (2, row), (2, row), colors.HexColor("#b45309")))
         table.setStyle(TableStyle(style))
         story.append(table)
-        if index < len(days) - 1: story.append(PageBreak())
+        if index < len(days) - 1:
+            story.append(PageBreak())
+
     document.build(story)
     buffer.seek(0)
     return buffer
