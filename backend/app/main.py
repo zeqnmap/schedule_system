@@ -874,59 +874,61 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
             Paragraph(f"{day_names[selected_day - 1]}  •  НЕДЕЛЯ {week_number}", subtitle),
             Spacer(1, 3 * mm),
         ])
+        # Timetable grid: teachers form the rows, lesson numbers form the columns.
+        # Paragraphs deliberately wrap full subject names instead of abbreviating them.
         rows_by_teacher = {}
         for entry in (entry for entry in entries if entry.day_of_week == selected_day):
             for teacher_id in {teacher_id for teacher_id in (entry.teacher_id, entry.teacher2_id) if teacher_id}:
-                rows_by_teacher.setdefault(teacher_id, []).append((
-                    entry.time_slot, 0,
-                    [teachers.get(teacher_id, f"Преподаватель {teacher_id}"), str(entry.time_slot), f"Группа {groups.get(entry.group_id, entry.group_id)}", entry.subject_name or "-", entry.room_name or "-"],
-                    False,
-                ))
+                rows_by_teacher.setdefault(teacher_id, {})[entry.time_slot] = {
+                    "subject": entry.subject_name or "—",
+                    "group": groups.get(entry.group_id, entry.group_id),
+                    "room": entry.room_name or "—",
+                    "curator": False,
+                }
         for item in (item for item in curator_hours if item.day_of_week == selected_day and item.teacher_id):
             target_groups = [item.group_id] if item.group_id not in (0, None) else list(groups)
             group_label = ", ".join(f"гр. {groups.get(group_id, group_id)}" for group_id in target_groups)
             slot_label = str(item.time_slot) if item.duration == 1 else f"{item.time_slot}-{item.time_slot + item.duration - 1}"
-            rows_by_teacher.setdefault(item.teacher_id, []).append((
-                item.time_slot, 1,
-                [teachers.get(item.teacher_id, f"Преподаватель {item.teacher_id}"), slot_label, group_label, "Кураторский час", item.room_name or "-"],
-                True,
-            ))
+            for slot in range(item.time_slot, item.time_slot + item.duration):
+                rows_by_teacher.setdefault(item.teacher_id, {})[slot] = {
+                    "subject": "Кураторский час",
+                    "group": group_label,
+                    "room": item.room_name or "—",
+                    "curator": True,
+                }
 
-        rows = [["Преподаватель", "№ урока", "Группа", "Предмет", "Кабинет"]]
-        teacher_spans, curator_rows = [], []
+        lesson_slots = list(range(1, max([entry.time_slot for entry in entries if entry.day_of_week == selected_day] + [item.time_slot + item.duration - 1 for item in curator_hours if item.day_of_week == selected_day] + [12]) + 1))
+        rows = [["Преподаватель"] + [str(slot) for slot in lesson_slots]]
         ordered_teachers = sorted(rows_by_teacher, key=lambda teacher_id: teachers.get(teacher_id, "").casefold())
-        for teacher_index, teacher_id in enumerate(ordered_teachers):
-            teacher_rows = sorted(rows_by_teacher[teacher_id], key=lambda item: (item[0], item[1]))
-            start_row = len(rows)
-            for row_index, (_, _, row, is_curator) in enumerate(teacher_rows):
-                row[0] = teachers.get(teacher_id, f"Преподаватель {teacher_id}") if row_index == 0 else ""
-                rows.append(row)
-                if is_curator:
-                    curator_rows.append(len(rows) - 1)
-            teacher_spans.append((start_row, len(rows) - 1))
+        cell_style = ParagraphStyle("TeachersGridCell", fontName="ScheduleFont", fontSize=6.4, leading=7.4, alignment=1, textColor=colors.HexColor("#0f172a"))
+        for teacher_id in ordered_teachers:
+            row = [Paragraph(teachers.get(teacher_id, f"Преподаватель {teacher_id}"), ParagraphStyle("TeacherName", parent=cell_style, fontName="ScheduleFont-Bold", fontSize=7.3, leading=8.5, textColor=colors.HexColor("#0f766e")))]
+            for slot in lesson_slots:
+                item = rows_by_teacher[teacher_id].get(slot)
+                if not item:
+                    row.append("")
+                    continue
+                label = f"{item['subject']}<br/><font size=5.7>Гр. {item['group']} · каб. {item['room']}</font>"
+                row.append(Paragraph(label, cell_style))
+            rows.append(row)
 
-        table = Table(rows, colWidths=[58 * mm, 20 * mm, 35 * mm, 100 * mm, 35 * mm], repeatRows=1, hAlign="CENTER")
+        page_width = landscape(A4)[0] - 16 * mm
+        teacher_width = min(48 * mm, max(36 * mm, page_width * 0.18))
+        slot_width = (page_width - teacher_width) / len(lesson_slots)
+        table = Table(rows, colWidths=[teacher_width] + [slot_width] * len(lesson_slots), repeatRows=1, hAlign="CENTER")
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, -1), "ScheduleFont"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("FONTSIZE", (0, 0), (-1, 0), 7),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ]
-        for teacher_index, (start_row, end_row) in enumerate(teacher_spans):
-            style.extend([
-                ("SPAN", (0, start_row), (0, end_row)),
-                ("FONTNAME", (0, start_row), (0, start_row), "ScheduleFont-Bold"),
-                ("FONTSIZE", (0, start_row), (0, start_row), 9),
-                ("BACKGROUND", (0, start_row), (0, end_row), colors.HexColor("#e8f3f1") if teacher_index % 2 == 0 else colors.HexColor("#eef2f7")),
-                ("TEXTCOLOR", (0, start_row), (0, start_row), colors.HexColor("#0f766e")),
-            ])
-        for row in curator_rows:
-            style.extend([("BACKGROUND", (1, row), (-1, row), colors.HexColor("#fff7ed")), ("TEXTCOLOR", (3, row), (3, row), colors.HexColor("#b45309"))])
+        for row_index in range(1, len(rows)):
+            style.append(("BACKGROUND", (0, row_index), (0, row_index), colors.HexColor("#e8f3f1") if row_index % 2 else colors.HexColor("#eef2f7")))
         table.setStyle(TableStyle(style))
         story.append(table)
         if index < len(days) - 1:
