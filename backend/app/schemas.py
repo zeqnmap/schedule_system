@@ -21,6 +21,8 @@ class GroupBase(BaseModel):
     has_saturday: bool = False
     weekly_hours: int = 30
     semester_weeks: int = 20
+    curator_teacher_id: Optional[int] = None
+    curator_room_name: Optional[str] = None
 
 
 class GroupCreate(GroupBase): pass
@@ -166,6 +168,7 @@ class CuratorHourCreate(BaseModel):
     group_id: Optional[int] = None
     room_name: Optional[str] = None
     teacher_id: Optional[int] = None
+    hour_type: str = "curator"
 
 
 class CuratorHourOut(CuratorHourCreate):

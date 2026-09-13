@@ -160,7 +160,7 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
         teacher.id: next((room.name for room in rooms if room.id == teacher.room_id), None)
         for teacher in teachers
     }
-    curator_hours = db.query(models.CuratorHour).filter_by(is_active=True).all()
+    curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
     blocked = {
         (group.id, item.day_of_week - 1, item.time_slot - 1 + offset)
         for group in groups
@@ -178,6 +178,18 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
         for item in curator_hours if item.room_name and item.room_name.strip()
         for offset in range(item.duration)
     }
+    # Global slots use each group's curator assignment from the directory.
+    for item in curator_hours:
+        if item.group_id in (0, None):
+            for group in groups:
+                teacher_id = getattr(group, "curator_teacher_id", None)
+                if teacher_id:
+                    for offset in range(item.duration):
+                        curator_teacher_slots.add((teacher_id, item.day_of_week - 1, item.time_slot - 1 + offset))
+                room_name = getattr(group, "curator_room_name", None)
+                if room_name:
+                    for offset in range(item.duration):
+                        curator_room_slots.add((room_name.strip(), item.day_of_week - 1, item.time_slot - 1 + offset))
 
     model = cp_model.CpModel()
     lesson, pair, single = {}, {}, {}

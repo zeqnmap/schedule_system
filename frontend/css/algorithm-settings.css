@@ -2,3 +2,4 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 [v-cloak] { display: none; }
 .rule-card { border: 1px solid rgba(148, 163, 184, .22); box-shadow: 0 18px 45px -28px rgba(15, 23, 42, .28); }
 .rule-card:hover { transform: translateY(-2px); box-shadow: 0 20px 42px -25px rgba(15, 23, 42, .35); }
+.legacy-curator-settings { display: none; }

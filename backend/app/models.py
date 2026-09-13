@@ -31,9 +31,12 @@ class Group(Base):
     has_saturday = Column(Boolean, default=False)
     weekly_hours = Column(Integer, default=30)
     semester_weeks = Column(Integer, default=20)
+    curator_teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
+    curator_room_name = Column(String, nullable=True)
 
     course_plans = relationship("CoursePlan", back_populates="group")
     schedule_entries = relationship("ScheduleEntry", back_populates="group")
+    curator_teacher = relationship("Teacher", foreign_keys=[curator_teacher_id])
 
 class CoursePlan(Base):
     __tablename__ = "course_plans"
@@ -100,6 +103,7 @@ class CuratorHour(Base):
     duration = Column(Integer, default=1, nullable=False)
     room_name = Column(String, nullable=True)
     teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
+    hour_type = Column(String, default="curator", nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     group = relationship("Group")
     teacher = relationship("Teacher")

@@ -53,6 +53,14 @@ with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE curator_hours ADD COLUMN room_name VARCHAR"))
     if "teacher_id" not in curator_columns:
         connection.execute(text("ALTER TABLE curator_hours ADD COLUMN teacher_id INTEGER"))
+    if "hour_type" not in curator_columns:
+        connection.execute(text("ALTER TABLE curator_hours ADD COLUMN hour_type VARCHAR DEFAULT 'curator' NOT NULL"))
+group_columns = {column["name"] for column in inspect(database.engine).get_columns("groups")}
+with database.engine.begin() as connection:
+    if "curator_teacher_id" not in group_columns:
+        connection.execute(text("ALTER TABLE groups ADD COLUMN curator_teacher_id INTEGER"))
+    if "curator_room_name" not in group_columns:
+        connection.execute(text("ALTER TABLE groups ADD COLUMN curator_room_name VARCHAR"))
 
 app = FastAPI(title="Schedule System API")
 
@@ -383,8 +391,23 @@ def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = D
     group.course = group_data.course
     group.has_saturday = group_data.has_saturday
     group.semester_weeks = group_data.semester_weeks
+    group.curator_teacher_id = group_data.curator_teacher_id
+    group.curator_room_name = group_data.curator_room_name
     db.commit()
     db.refresh(group)
+    return group
+
+@app.patch("/groups/{group_id}/curator-assignment", response_model=schemas.GroupOut)
+def update_group_curator_assignment(group_id: int, data: dict, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    group = db.query(models.Group).filter_by(id=group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
+    teacher_id = data.get("curator_teacher_id")
+    if teacher_id is not None and not db.query(models.Teacher).filter_by(id=teacher_id).first():
+        raise HTTPException(status_code=404, detail="Куратор не найден")
+    group.curator_teacher_id = teacher_id
+    group.curator_room_name = (data.get("curator_room_name") or "").strip() or None
+    db.commit(); db.refresh(group)
     return group
 
 
@@ -531,7 +554,7 @@ def delete_algorithm_rule(rule_id: int, _: models.User = Depends(require_admin),
 
 @app.get("/curator-hours/", response_model=List[schemas.CuratorHourOut])
 def read_curator_hours(_: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
-    return db.query(models.CuratorHour).filter_by(is_active=True).order_by(models.CuratorHour.group_id, models.CuratorHour.day_of_week, models.CuratorHour.time_slot).all()
+    return db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).order_by(models.CuratorHour.day_of_week, models.CuratorHour.time_slot).all()
 
 
 @app.post("/curator-hours/", response_model=schemas.CuratorHourOut)
@@ -541,6 +564,8 @@ def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depend
     if data.duration == 2 and data.time_slot == 12:
         raise HTTPException(status_code=400, detail="Для двух уроков нужен не последний слот")
     group_id = data.group_id if data.group_id is not None else 0
+    if data.hour_type not in {"curator", "information"}:
+        raise HTTPException(status_code=400, detail="Неизвестный тип часа")
     if group_id != 0 and not db.query(models.Group).filter_by(id=group_id).first():
         raise HTTPException(status_code=404, detail="Группа не найдена")
     if group_id != 0 and data.teacher_id is None:
@@ -585,6 +610,8 @@ def update_curator_hour(item_id: int, data: schemas.CuratorHourCreate, _: models
     if not item:
         raise HTTPException(status_code=404, detail="Кураторский час не найден")
     group_id = data.group_id if data.group_id is not None else item.group_id or 0
+    if data.hour_type not in {"curator", "information"}:
+        raise HTTPException(status_code=400, detail="Неизвестный тип часа")
     if group_id != 0 and (data.teacher_id is None or not (data.room_name or "").strip()):
         raise HTTPException(status_code=400, detail="Для группового кураторского часа выберите куратора и кабинет")
     for slot in range(data.time_slot, data.time_slot + data.duration):
@@ -665,7 +692,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
     group_numbers = {group.id: group.number for group in db.query(models.Group).all()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
-    curator_hours = db.query(models.CuratorHour).filter_by(is_active=True).all()
+    curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == week_number,
         models.ScheduleEntry.status != "canceled",
@@ -793,7 +820,7 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
     pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
     groups = {group.id: group.number for group in db.query(models.Group).all()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
-    curator_hours = db.query(models.CuratorHour).filter_by(is_active=True).all()
+    curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == week_number,
         models.ScheduleEntry.status != "canceled",
