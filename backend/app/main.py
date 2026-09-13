@@ -372,6 +372,7 @@ def get_teachers_workload(db: Session = Depends(database.get_db)):
 # ----------------- ГРУППЫ -----------------
 @app.post("/groups/", response_model=schemas.GroupOut)
 def create_group(group: schemas.GroupCreate, db: Session = Depends(database.get_db)):
+    validate_group_curator_assignment(None, group.curator_teacher_id, group.curator_room_name, db)
     db_group = models.Group(**group.dict())
     db.add(db_group)
     db.commit()
@@ -387,6 +388,9 @@ def read_groups(skip: int = 0, limit: int = 100, db: Session = Depends(database.
 @app.put("/groups/{group_id}", response_model=schemas.GroupOut)
 def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = Depends(database.get_db)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
+    validate_group_curator_assignment(group_id, group_data.curator_teacher_id, group_data.curator_room_name, db)
     group.number = group_data.number
     group.course = group_data.course
     group.has_saturday = group_data.has_saturday
@@ -397,14 +401,38 @@ def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = D
     db.refresh(group)
     return group
 
+def validate_group_curator_assignment(group_id: int, teacher_id: Optional[int], room_name: Optional[str], db: Session):
+    """A global curator slot is simultaneous for every group; resources cannot be shared."""
+    if teacher_id is not None and not db.query(models.Teacher).filter_by(id=teacher_id).first():
+        raise HTTPException(status_code=404, detail="Куратор не найден")
+    room_name = (room_name or "").strip() or None
+    slots = db.query(models.CuratorHour).filter(
+        models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])
+    ).all()
+    for slot in slots:
+        occupied_entries = db.query(models.ScheduleEntry).filter(
+            models.ScheduleEntry.day_of_week == slot.day_of_week,
+            models.ScheduleEntry.time_slot >= slot.time_slot,
+            models.ScheduleEntry.time_slot < slot.time_slot + slot.duration,
+            models.ScheduleEntry.status != "canceled",
+        ).all()
+        if teacher_id and any(teacher_id in {entry.teacher_id, entry.teacher2_id} for entry in occupied_entries):
+            raise HTTPException(status_code=409, detail="Этот куратор уже ведёт занятие в выбранный день и урок")
+        if room_name and any((entry.room_name or '').strip() == room_name for entry in occupied_entries):
+            raise HTTPException(status_code=409, detail="Этот кабинет уже занят в выбранный день и урок")
+        for other in db.query(models.Group).filter(models.Group.id != group_id if group_id is not None else True).all():
+            if teacher_id and teacher_id == other.curator_teacher_id:
+                raise HTTPException(status_code=409, detail="Этот куратор уже назначен другой группе на общий кураторский час")
+            if room_name and room_name == (other.curator_room_name or '').strip():
+                raise HTTPException(status_code=409, detail="Этот кабинет уже назначен другой группе на общий кураторский час")
+
 @app.patch("/groups/{group_id}/curator-assignment", response_model=schemas.GroupOut)
 def update_group_curator_assignment(group_id: int, data: dict, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     group = db.query(models.Group).filter_by(id=group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Группа не найдена")
     teacher_id = data.get("curator_teacher_id")
-    if teacher_id is not None and not db.query(models.Teacher).filter_by(id=teacher_id).first():
-        raise HTTPException(status_code=404, detail="Куратор не найден")
+    validate_group_curator_assignment(group_id, teacher_id, data.get("curator_room_name"), db)
     group.curator_teacher_id = teacher_id
     group.curator_room_name = (data.get("curator_room_name") or "").strip() or None
     db.commit(); db.refresh(group)
@@ -962,6 +990,17 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
     ).first()
     if blocked:
         raise HTTPException(status_code=409, detail="Этот слот заблокирован кураторским часом")
+    group = db.query(models.Group).filter_by(id=data.group_id).first()
+    global_hours = db.query(models.CuratorHour).filter(
+        models.CuratorHour.group_id.in_([0, None]), models.CuratorHour.day_of_week == data.day_of_week,
+        models.CuratorHour.is_active.is_(True), models.CuratorHour.time_slot <= data.time_slot,
+        models.CuratorHour.time_slot + models.CuratorHour.duration > data.time_slot,
+    ).all()
+    if group and global_hours:
+        if group.curator_teacher_id and group.curator_teacher_id in teacher_ids:
+            raise HTTPException(status_code=409, detail="Куратор группы уже занят общим часом")
+        if group.curator_room_name and data.room_name.strip() == group.curator_room_name.strip():
+            raise HTTPException(status_code=409, detail="Кабинет группы занят общим часом")
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == data.week_number,
         models.ScheduleEntry.day_of_week == data.day_of_week,

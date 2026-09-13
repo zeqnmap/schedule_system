@@ -5,6 +5,7 @@ createApp({
         const rooms = ref([]);
         const teachers = ref([]);
         const workloads = ref([]);
+        const errorMessage = ref('');
         const weekDays = [
             { id: 1, name: 'Пн' }, { id: 2, name: 'Вт' }, { id: 3, name: 'Ср' },
             { id: 4, name: 'Чт' }, { id: 5, name: 'Пт' }, { id: 6, name: 'Сб' }
@@ -38,7 +39,8 @@ createApp({
         const saveRoom = async () => {
             const trimmedName = newRoom.value.name.trim();
             if (!trimmedName) return;
-            await fetch('/rooms/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmedName }) });
+            const response = await fetch('/rooms/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmedName }) });
+            if (!response.ok) { errorMessage.value = (await response.json().catch(() => ({}))).detail || 'Не удалось сохранить кабинет'; return; }
             newRoom.value.name = '';
             fetchData();
         };
@@ -51,7 +53,8 @@ createApp({
             const payload = { ...newTeacher.value, working_days: newTeacher.value.working_days.join(',') };
             const url = editingTeacherId.value ? `/teachers/${editingTeacherId.value}` : '/teachers/';
             const method = editingTeacherId.value ? 'PUT' : 'POST';
-            await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) { errorMessage.value = (await response.json().catch(() => ({}))).detail || 'Не удалось сохранить преподавателя'; return; }
             resetTeacherForm();
             fetchData();
         };
@@ -82,6 +85,6 @@ createApp({
             closeVacationEditor();
         };
 
-        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, vacationEditorId, vacationWeeks, semesterWeekOptions, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacationWeeks, getRoomName, getRoomOccupant, formatWorkingDays, workload };
+        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, vacationEditorId, vacationWeeks, semesterWeekOptions, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacationWeeks, getRoomName, getRoomOccupant, formatWorkingDays, workload, errorMessage };
     }
 }).component('searchable-select', SearchableSelect).mount('#app');
