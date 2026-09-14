@@ -67,7 +67,24 @@
                         </div>
                     </div>
 
-                    <div v-if="editingGroupId" class="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4"><div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-widest mb-2">Куратор</label><select v-model="newGroup.curator_teacher_id" class="input-modern w-full px-4 py-3"><option :value="null">Не выбран</option><option v-if="newGroup.curator_teacher_id && !availableCuratorTeachers.some(t => t.id === newGroup.curator_teacher_id)" :value="newGroup.curator_teacher_id">Текущий выбор</option><option v-for="t in availableCuratorTeachers" :value="t.id">{{ t.name }}</option></select></div><div><label class="block text-xs font-extrabold text-slate-500 uppercase tracking-widest mb-2">Кабинет кураторского часа</label><select v-model="newGroup.curator_room_name" class="input-modern w-full px-4 py-3"><option value="">Не выбран</option><option v-if="newGroup.curator_room_name && !availableCuratorRooms.some(r => r.name === newGroup.curator_room_name)" :value="newGroup.curator_room_name">Текущий выбор</option><option v-for="r in availableCuratorRooms" :value="r.name">{{ r.name }}</option></select></div></div>
+                    <div v-if="editingGroupId" class="curator-fields grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Куратор</label>
+                            <select v-model="newGroup.curator_teacher_id" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg cursor-pointer">
+                                <option :value="null">Не выбран</option>
+                                <option v-if="newGroup.curator_teacher_id && !availableCuratorTeachers.some(t => t.id === newGroup.curator_teacher_id)" :value="newGroup.curator_teacher_id">Текущий выбор</option>
+                                <option v-for="t in availableCuratorTeachers" :value="t.id">{{ t.name }}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет кураторского часа</label>
+                            <select v-model="newGroup.curator_room_name" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg cursor-pointer">
+                                <option value="">Не выбран</option>
+                                <option v-if="newGroup.curator_room_name && !availableCuratorRooms.some(r => r.name === newGroup.curator_room_name)" :value="newGroup.curator_room_name">Текущий выбор</option>
+                                <option v-for="r in availableCuratorRooms" :value="r.name">{{ r.name }}</option>
+                            </select>
+                        </div>
+                    </div>
 
                     <div class="flex gap-3 pt-2">
                         <button type="submit" class="flex-1 btn-emerald font-extrabold text-base py-4 rounded-2xl">

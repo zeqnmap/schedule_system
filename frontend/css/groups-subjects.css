@@ -3,6 +3,8 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 .bento-card:hover { box-shadow: 0 20px 40px -10px rgba(0,0,0,0.07); transform: translateY(-2px); }
 .input-modern { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 16px; transition: all 0.2s ease; outline: none; }
 .input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
+.curator-fields { padding-top: 2px; }
+.curator-fields > div { min-width: 0; }
 .btn-emerald { background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; box-shadow: 0 8px 24px -6px rgba(16, 185, 129, 0.4); transition: all 0.2s ease; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
 .btn-emerald:hover { box-shadow: 0 12px 32px -6px rgba(16, 185, 129, 0.5); transform: translateY(-2px); }
 .btn-coral { background-color: #FFF1F2; color: #E11D48; transition: all 0.2s ease; cursor: pointer; border: 1px solid transparent; }
