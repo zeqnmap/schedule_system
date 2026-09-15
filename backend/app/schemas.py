@@ -135,6 +135,7 @@ class ArchivedWeekOut(BaseModel):
 
 class GroupTermBase(BaseModel):
     group_id: int
+    academic_year_id: Optional[int] = None
     term_number: int
     name: str
     start_date: date
@@ -151,6 +152,22 @@ class GroupTermOut(GroupTermBase):
     start_week: int
     weeks: int
     is_locked: bool
+
+    class Config: from_attributes = True
+
+
+class AcademicYearBase(BaseModel):
+    name: str
+    start_date: date
+    end_date: date
+    is_active: bool = True
+
+
+class AcademicYearCreate(AcademicYearBase): pass
+
+
+class AcademicYearOut(AcademicYearBase):
+    id: int
 
     class Config: from_attributes = True
 

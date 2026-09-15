@@ -24,6 +24,7 @@
     const current = location.pathname.split('/').pop() || 'index.html';
     const pages = [
         ['groups_subjects.html', 'Справочники', 'admin'],
+        ['academic_years.html', 'Учебные годы', 'admin'],
         ['teachers.html', 'Преподаватели', 'admin'],
         ['admin.html', 'Учебные планы', 'admin'],
         ['progress.html', 'Часы', 'admin'],

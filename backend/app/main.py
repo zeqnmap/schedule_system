@@ -387,6 +387,44 @@ def get_teachers_workload(db: Session = Depends(database.get_db)):
 
 
 # ----------------- ГРУППЫ -----------------
+@app.get("/academic-years/", response_model=List[schemas.AcademicYearOut])
+def read_academic_years(db: Session = Depends(database.get_db)):
+    return db.query(models.AcademicYear).order_by(models.AcademicYear.start_date.desc(), models.AcademicYear.id.desc()).all()
+
+
+@app.post("/academic-years/", response_model=schemas.AcademicYearOut)
+def create_academic_year(data: schemas.AcademicYearCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    name = data.name.strip()
+    if not name or data.end_date < data.start_date:
+        raise HTTPException(status_code=400, detail="Проверьте название и даты учебного года")
+    if db.query(models.AcademicYear).filter(models.AcademicYear.name == name).first():
+        raise HTTPException(status_code=409, detail="Такой учебный год уже существует")
+    if data.is_active:
+        db.query(models.AcademicYear).update({models.AcademicYear.is_active: False}, synchronize_session=False)
+    year = models.AcademicYear(name=name, start_date=data.start_date, end_date=data.end_date, is_active=data.is_active)
+    db.add(year); db.commit(); db.refresh(year)
+    return year
+
+
+@app.put("/academic-years/{year_id}", response_model=schemas.AcademicYearOut)
+def update_academic_year(year_id: int, data: schemas.AcademicYearCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    year = db.query(models.AcademicYear).filter_by(id=year_id).first()
+    if not year: raise HTTPException(status_code=404, detail="Учебный год не найден")
+    if data.end_date < data.start_date: raise HTTPException(status_code=400, detail="Дата окончания раньше даты начала")
+    duplicate = db.query(models.AcademicYear).filter(models.AcademicYear.name == data.name.strip(), models.AcademicYear.id != year_id).first()
+    if duplicate: raise HTTPException(status_code=409, detail="Такой учебный год уже существует")
+    year.name, year.start_date, year.end_date, year.is_active = data.name.strip(), data.start_date, data.end_date, data.is_active
+    db.commit(); db.refresh(year); return year
+
+
+@app.post("/academic-years/{year_id}/activate", response_model=schemas.AcademicYearOut)
+def activate_academic_year(year_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    year = db.query(models.AcademicYear).filter_by(id=year_id).first()
+    if not year: raise HTTPException(status_code=404, detail="Учебный год не найден")
+    db.query(models.AcademicYear).update({models.AcademicYear.is_active: False}, synchronize_session=False)
+    year.is_active = True; db.commit(); db.refresh(year); return year
+
+
 @app.post("/groups/", response_model=schemas.GroupOut)
 def create_group(group: schemas.GroupCreate, db: Session = Depends(database.get_db)):
     validate_group_curator_assignment(None, group.curator_teacher_id, group.curator_room_name, db)
@@ -506,10 +544,12 @@ def set_group_weekly_hours(group_id: int, payload: dict, db: Session = Depends(d
 
 
 @app.get("/group-terms/", response_model=List[schemas.GroupTermOut])
-def read_group_terms(group_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+def read_group_terms(group_id: Optional[int] = None, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     query = db.query(models.GroupTerm).filter(models.GroupTerm.is_active.is_(True))
     if group_id:
         query = query.filter(models.GroupTerm.group_id == group_id)
+    if academic_year_id:
+        query = query.filter(models.GroupTerm.academic_year_id == academic_year_id)
     return query.order_by(models.GroupTerm.group_id, models.GroupTerm.term_number).all()
 
 
@@ -518,7 +558,7 @@ def create_group_term(data: schemas.GroupTermCreate, _: models.User = Depends(re
     group = db.query(models.Group).filter_by(id=data.group_id).first()
     if not group or data.end_date < data.start_date or data.term_number not in (1, 2):
         raise HTTPException(status_code=400, detail="Проверьте группу, даты и номер семестра")
-    year = db.query(models.AcademicYear).filter_by(is_active=True).first()
+    year = db.query(models.AcademicYear).filter_by(id=data.academic_year_id).first() if data.academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
     if not year:
         year = models.AcademicYear(name=f"{data.start_date.year}–{data.end_date.year if data.end_date.year != data.start_date.year else data.start_date.year + 1}", start_date=data.start_date, end_date=data.end_date, is_active=True)
         db.add(year); db.flush()
