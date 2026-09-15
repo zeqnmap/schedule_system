@@ -6,6 +6,7 @@ teacher collisions, group collisions and room collisions are hard rules.
 """
 
 from typing import List
+from datetime import date, timedelta
 
 from ortools.sat.python import cp_model
 from sqlalchemy import or_
@@ -85,12 +86,14 @@ def consumed_hours(db: Session, plan, before_week=None) -> int:
         models.ScheduleEntry.subject_name == plan.subject_name,
         models.ScheduleEntry.status != "canceled",
     )
+    if getattr(plan, "term_id", None):
+        query = query.filter(models.ScheduleEntry.term_id == plan.term_id)
     if before_week is not None:
         query = query.filter(models.ScheduleEntry.week_number < before_week)
     return query.count()
 
 
-def build_subject_demands(db, groups, course_plans, rules, week):
+def build_subject_demands(db, groups, course_plans, rules, week, terms_by_group):
     archived = {
         item.group_id for item in db.query(models.ArchivedWeek).filter_by(
             week_number=week, is_archived=True
@@ -100,7 +103,8 @@ def build_subject_demands(db, groups, course_plans, rules, week):
     demands = []
     for plan in course_plans:
         group = groups_by_id.get(plan.group_id)
-        if not group:
+        term = terms_by_group.get(plan.group_id)
+        if not group or not term or plan.term_id != term.id:
             continue
         rule = find_rule_for_plan(plan, group, rules)
         limit = rule.weekly_hours if rule else (plan.max_weekly_hours or 4)
@@ -149,12 +153,12 @@ def validate_rules(groups, course_plans, rules):
                 if plan.group_id == group.id
                 and plan.subject_name.strip().casefold() == rule.subject_name.strip().casefold()
             ]
-            if len(plans) != 1:
+            if plans and len(plans) != 1:
                 errors.append(f"Гр. {group.number}: для правила '{rule.subject_name}' нужен ровно один учебный план.")
     return errors
 
 
-def make_model(db, week, groups, teachers, rooms, demands, strict_load):
+def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by_group):
     group_demands = {group.id: [item for item in demands if item.group_id == group.id] for group in groups}
     room_by_teacher = {
         teacher.id: next((room.name for room in rooms if room.id == teacher.room_id), None)
@@ -217,7 +221,8 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
             model.Add(sum(singles) <= max_singles)
 
             total = sum(lesson[group.id, day, slot, demand.id] for day in range(days) for slot in range(SLOTS_PER_DAY))
-            weeks_left = max(1, int(group.semester_weeks or 20) - week + 1)
+            term = terms_by_group[group.id]
+            weeks_left = max(1, int(term.start_week + term.weeks - week))
             upper = demand.remaining
             lower = 0
             model.Add(total >= lower)
@@ -276,6 +281,9 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
         for room in rooms
     }
 
+    fixed_entries = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.week_number == week, models.ScheduleEntry.status != "canceled"
+    ).all()
     for day in range(DAY_COUNT):
         for slot in range(SLOTS_PER_DAY):
             for teacher in teachers:
@@ -286,6 +294,8 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
                 ]
                 if variables:
                     model.Add(sum(variables) <= 1)
+                    if any(teacher.id in {entry.teacher_id, entry.teacher2_id} for entry in fixed_entries if entry.day_of_week == day + 1 and entry.time_slot == slot + 1):
+                        for variable in variables: model.Add(variable == 0)
                     if teacher.on_vacation or teacher.is_sick or week in get_teacher_vacation_weeks(teacher):
                         for variable in variables:
                             model.Add(variable == 0)
@@ -312,6 +322,8 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
                     model.Add(sum(regular + sports) <= 1)
                 elif sports:
                     model.Add(sum(sports) <= 2)
+                if any((entry.room_name or "").strip() == room.name.strip() for entry in fixed_entries if entry.day_of_week == day + 1 and entry.time_slot == slot + 1):
+                    for variable in regular + sports: model.Add(variable == 0)
 
     # A teacher's weekly limit is also a hard constraint. Co-teaching still
     # counts as one conducted lesson for each of the two teachers.
@@ -344,9 +356,10 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load):
     return model, lesson, group_demands, room_by_teacher
 
 
-def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_plans, rules=None, strict_load=True):
+def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_plans, rules=None, strict_load=True, terms_by_group=None):
     rules = rules or []
-    demands = build_subject_demands(db, groups, course_plans, rules, week)
+    terms_by_group = terms_by_group or {}
+    demands = build_subject_demands(db, groups, course_plans, rules, week, terms_by_group)
     active_ids = {item.group_id for item in demands}
     active_groups = [
         group for group in groups
@@ -360,7 +373,7 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
     model, lesson, group_demands, room_by_teacher = make_model(
         db, week, active_groups, teachers, rooms,
         [item for item in demands if item.group_id in {group.id for group in active_groups}],
-        strict_load,
+        strict_load, terms_by_group,
     )
     cp_solver = cp_model.CpSolver()
     # Independent weeks can be solved quickly in parallel. A valid solution
@@ -370,7 +383,7 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
     status = cp_solver.Solve(model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         if strict_load:
-            return solve_global_week(db, week, groups, teachers, rooms, course_plans, rules, strict_load=False)
+            return solve_global_week(db, week, groups, teachers, rooms, course_plans, rules, strict_load=False, terms_by_group=terms_by_group)
         return False, f"Неделя {week}: невозможно составить безопасное расписание без накладок."
 
     for group in active_groups:
@@ -388,6 +401,7 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
                             group_id=group.id,
                             subject_name=demand.plan.subject_name,
                             status="planned",
+                            term_id=terms_by_group[group.id].id,
                         ))
     db.commit()
     return True, f"Неделя {week}: создано безопасное расписание."
@@ -397,7 +411,27 @@ def trigger_global_generation(db: Session, approve_adjustments: bool = False):
     teachers = db.query(models.Teacher).filter_by(is_active=True).all()
     groups = db.query(models.Group).all()
     rooms = db.query(models.Room).all()
-    course_plans = db.query(models.CoursePlan).all()
+    terms = db.query(models.GroupTerm).filter_by(is_active=True).all()
+    # Backfill the first period for legacy groups created before semester support.
+    active_year = db.query(models.AcademicYear).filter_by(is_active=True).first()
+    if not active_year:
+        active_year = models.AcademicYear(name="2026–2027", start_date=date(2026, 9, 1), end_date=date(2027, 8, 31), is_active=True)
+        db.add(active_year); db.flush()
+    existing_groups = {term.group_id for term in terms}
+    for group in db.query(models.Group).all():
+        if group.id in existing_groups:
+            continue
+        weeks = max(1, int(group.semester_weeks or 20))
+        term = models.GroupTerm(academic_year_id=active_year.id, group_id=group.id, term_number=1, name="1 семестр", start_week=1, weeks=weeks, start_date=active_year.start_date, end_date=active_year.start_date + timedelta(days=weeks * 7 - 1), is_active=True, is_locked=False)
+        db.add(term); db.flush()
+        db.query(models.CoursePlan).filter(models.CoursePlan.group_id == group.id, models.CoursePlan.term_id.is_(None)).update({"term_id": term.id}, synchronize_session=False)
+        db.query(models.ScheduleEntry).filter(models.ScheduleEntry.group_id == group.id, models.ScheduleEntry.term_id.is_(None)).update({"term_id": term.id}, synchronize_session=False)
+        terms.append(term)
+    db.commit()
+    unlocked_terms = [term for term in terms if not term.is_locked]
+    if not unlocked_terms:
+        return False, "Нет открытых семестров для генерации. Завершённые семестры доступны только для ручного редактирования."
+    course_plans = db.query(models.CoursePlan).filter(models.CoursePlan.term_id.in_([term.id for term in unlocked_terms])).all()
     rules = db.query(models.AlgorithmRule).filter_by(is_active=True).all()
     if not groups:
         return False, "Нет групп для генерации."
@@ -414,15 +448,20 @@ def trigger_global_generation(db: Session, approve_adjustments: bool = False):
     # rows belonging to open weeks; filtering by group alone would destroy the
     # protected history of that group.
     for entry in db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.term_id.in_([term.id for term in unlocked_terms]),
         or_(models.ScheduleEntry.status == "planned", models.ScheduleEntry.status.is_(None))
     ).all():
         if (entry.group_id, entry.week_number) not in archived:
             db.delete(entry)
     db.commit()
 
-    max_weeks = max(int(group.semester_weeks or 20) for group in groups)
+    max_weeks = max(term.start_week + term.weeks - 1 for term in unlocked_terms)
     for week in range(1, max_weeks + 1):
-        success, message = solve_global_week(db, week, groups, teachers, rooms, course_plans, rules, strict_load=True)
+        terms_by_group = {term.group_id: term for term in unlocked_terms if term.start_week <= week < term.start_week + term.weeks}
+        active_groups = [group for group in groups if group.id in terms_by_group]
+        if not active_groups:
+            continue
+        success, message = solve_global_week(db, week, active_groups, teachers, rooms, course_plans, rules, strict_load=True, terms_by_group=terms_by_group)
         if not success:
             return False, message
 
@@ -433,7 +472,7 @@ def trigger_global_generation(db: Session, approve_adjustments: bool = False):
             group = next((item for item in groups if item.id == plan.group_id), None)
             shortages.append(f"Гр. {group.number if group else plan.group_id}, {plan.subject_name}: не доставлено {missing} ч.")
 
-    result = f"Расписание создано на {max_weeks} недель без накладок."
+    result = f"Расписание создано для открытых семестров до {max_weeks}-й календарной недели без накладок."
     if shortages:
         result += "\n\nНЕДОСТАВЛЕННЫЕ ЧАСЫ — измените планы вручную:\n" + "\n".join(shortages)
     return True, result

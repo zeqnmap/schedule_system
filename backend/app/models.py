@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Date, ForeignKey
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -37,6 +37,7 @@ class Group(Base):
     course_plans = relationship("CoursePlan", back_populates="group")
     schedule_entries = relationship("ScheduleEntry", back_populates="group")
     curator_teacher = relationship("Teacher", foreign_keys=[curator_teacher_id])
+    terms = relationship("GroupTerm", back_populates="group", cascade="all, delete-orphan")
 
 class CoursePlan(Base):
     __tablename__ = "course_plans"
@@ -47,10 +48,12 @@ class CoursePlan(Base):
     group_id = Column(Integer, ForeignKey("groups.id"))
     teacher_id = Column(Integer, ForeignKey("teachers.id"))
     teacher2_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
+    term_id = Column(Integer, ForeignKey("group_terms.id"), nullable=True, index=True)
 
     group = relationship("Group", back_populates="course_plans")
     teacher = relationship("Teacher", foreign_keys=[teacher_id])
     teacher2 = relationship("Teacher", foreign_keys=[teacher2_id])
+    term = relationship("GroupTerm", back_populates="course_plans")
 
 class ScheduleEntry(Base):
     __tablename__ = "schedule_entries"
@@ -64,8 +67,39 @@ class ScheduleEntry(Base):
     group_id = Column(Integer, ForeignKey("groups.id"))
     subject_name = Column(String)
     status = Column(String, default="planned") # <--- НОВАЯ ЛОГИКА (planned / canceled)
+    term_id = Column(Integer, ForeignKey("group_terms.id"), nullable=True, index=True)
 
     group = relationship("Group", back_populates="schedule_entries")
+    term = relationship("GroupTerm", back_populates="schedule_entries")
+
+
+class AcademicYear(Base):
+    __tablename__ = "academic_years"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    terms = relationship("GroupTerm", back_populates="academic_year")
+
+
+class GroupTerm(Base):
+    __tablename__ = "group_terms"
+    id = Column(Integer, primary_key=True, index=True)
+    academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=False, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False, index=True)
+    term_number = Column(Integer, nullable=False)
+    name = Column(String, nullable=False)
+    start_week = Column(Integer, nullable=False)
+    weeks = Column(Integer, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_locked = Column(Boolean, default=False, nullable=False)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    academic_year = relationship("AcademicYear", back_populates="terms")
+    group = relationship("Group", back_populates="terms")
+    course_plans = relationship("CoursePlan", back_populates="term")
+    schedule_entries = relationship("ScheduleEntry", back_populates="term")
 
 class ArchivedWeek(Base):
     __tablename__ = "archived_weeks"

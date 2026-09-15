@@ -61,6 +61,23 @@ with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE groups ADD COLUMN curator_teacher_id INTEGER"))
     if "curator_room_name" not in group_columns:
         connection.execute(text("ALTER TABLE groups ADD COLUMN curator_room_name VARCHAR"))
+term_columns = {column["name"] for column in inspect(database.engine).get_columns("group_terms")}
+with database.engine.begin() as connection:
+    course_plan_columns = {column["name"] for column in inspect(database.engine).get_columns("course_plans")}
+    schedule_entry_columns = {column["name"] for column in inspect(database.engine).get_columns("schedule_entries")}
+    if "term_id" not in course_plan_columns:
+        connection.execute(text("ALTER TABLE course_plans ADD COLUMN term_id INTEGER"))
+    if "term_id" not in schedule_entry_columns:
+        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN term_id INTEGER"))
+    if "is_locked" not in term_columns:
+        connection.execute(text("ALTER TABLE group_terms ADD COLUMN is_locked BOOLEAN DEFAULT 0 NOT NULL"))
+    if "start_date" not in term_columns:
+        connection.execute(text("ALTER TABLE group_terms ADD COLUMN start_date DATE"))
+    if "end_date" not in term_columns:
+        connection.execute(text("ALTER TABLE group_terms ADD COLUMN end_date DATE"))
+    connection.execute(text("UPDATE group_terms SET start_date = COALESCE(start_date, '2026-09-01'), end_date = COALESCE(end_date, date('2026-09-01', '+' || (start_week + weeks - 2) || ' days'))"))
+    connection.execute(text("UPDATE course_plans SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = course_plans.group_id AND group_terms.term_number = 1 LIMIT 1) WHERE term_id IS NULL"))
+    connection.execute(text("UPDATE schedule_entries SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = schedule_entries.group_id AND schedule_entries.week_number >= group_terms.start_week AND schedule_entries.week_number < group_terms.start_week + group_terms.weeks ORDER BY group_terms.term_number LIMIT 1) WHERE term_id IS NULL"))
 
 app = FastAPI(title="Schedule System API")
 
@@ -377,6 +394,7 @@ def create_group(group: schemas.GroupCreate, db: Session = Depends(database.get_
     db.add(db_group)
     db.commit()
     db.refresh(db_group)
+    ensure_group_first_term(db, db_group)
     return db_group
 
 
@@ -398,8 +416,31 @@ def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = D
     group.curator_teacher_id = group_data.curator_teacher_id
     group.curator_room_name = group_data.curator_room_name
     db.commit()
+    ensure_group_first_term(db, group)
     db.refresh(group)
     return group
+
+
+def ensure_group_first_term(db: Session, group: models.Group):
+    """Keep the legacy 'weeks in semester' field as the default first term length."""
+    term = db.query(models.GroupTerm).filter_by(group_id=group.id, term_number=1).first()
+    if term:
+        if not term.is_locked and int(group.semester_weeks or 0) > 0:
+            term.weeks = int(group.semester_weeks)
+            if term.start_date:
+                term.end_date = term.start_date + __import__('datetime').timedelta(days=term.weeks * 7 - 1)
+            db.commit()
+        return term
+    year = db.query(models.AcademicYear).filter_by(is_active=True).first()
+    if not year:
+        year = models.AcademicYear(name="2026–2027", start_date=date(2026, 9, 1), end_date=date(2027, 8, 31), is_active=True)
+        db.add(year); db.flush()
+    weeks = max(1, int(group.semester_weeks or 20))
+    term = models.GroupTerm(academic_year_id=year.id, group_id=group.id, term_number=1, name="1 семестр", start_week=1, weeks=weeks, start_date=year.start_date, end_date=year.start_date + __import__('datetime').timedelta(days=weeks * 7 - 1), is_active=True, is_locked=False)
+    db.add(term); db.flush()
+    db.query(models.CoursePlan).filter(models.CoursePlan.group_id == group.id, models.CoursePlan.term_id.is_(None)).update({"term_id": term.id}, synchronize_session=False)
+    db.commit()
+    return term
 
 def validate_group_curator_assignment(group_id: int, teacher_id: Optional[int], room_name: Optional[str], db: Session):
     """A global curator slot is simultaneous for every group; resources cannot be shared."""
@@ -464,6 +505,78 @@ def set_group_weekly_hours(group_id: int, payload: dict, db: Session = Depends(d
     return group
 
 
+@app.get("/group-terms/", response_model=List[schemas.GroupTermOut])
+def read_group_terms(group_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+    query = db.query(models.GroupTerm).filter(models.GroupTerm.is_active.is_(True))
+    if group_id:
+        query = query.filter(models.GroupTerm.group_id == group_id)
+    return query.order_by(models.GroupTerm.group_id, models.GroupTerm.term_number).all()
+
+
+@app.post("/group-terms/", response_model=schemas.GroupTermOut)
+def create_group_term(data: schemas.GroupTermCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    group = db.query(models.Group).filter_by(id=data.group_id).first()
+    if not group or data.end_date < data.start_date or data.term_number not in (1, 2):
+        raise HTTPException(status_code=400, detail="Проверьте группу, даты и номер семестра")
+    year = db.query(models.AcademicYear).filter_by(is_active=True).first()
+    if not year:
+        year = models.AcademicYear(name=f"{data.start_date.year}–{data.end_date.year if data.end_date.year != data.start_date.year else data.start_date.year + 1}", start_date=data.start_date, end_date=data.end_date, is_active=True)
+        db.add(year); db.flush()
+    overlap = db.query(models.GroupTerm).filter(
+        models.GroupTerm.group_id == data.group_id,
+        models.GroupTerm.is_active.is_(True),
+        models.GroupTerm.start_date <= data.end_date,
+        models.GroupTerm.end_date >= data.start_date,
+    ).first()
+    if overlap:
+        raise HTTPException(status_code=409, detail=f"Даты пересекаются с периодом «{overlap.name}» этой группы")
+    start_week = max(1, ((data.start_date - year.start_date).days // 7) + 1)
+    weeks = max(1, ((data.end_date - data.start_date).days // 7) + 1)
+    term = models.GroupTerm(academic_year_id=year.id, group_id=data.group_id, term_number=data.term_number, name=data.name, start_week=start_week, weeks=weeks, start_date=data.start_date, end_date=data.end_date, is_active=True, is_locked=False)
+    db.add(term); db.commit(); db.refresh(term)
+    return term
+
+
+@app.put("/group-terms/{term_id}", response_model=schemas.GroupTermOut)
+def update_group_term(term_id: int, data: schemas.GroupTermCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    term = db.query(models.GroupTerm).filter_by(id=term_id).first()
+    if not term:
+        raise HTTPException(status_code=404, detail="Семестр не найден")
+    if term.is_locked:
+        raise HTTPException(status_code=409, detail="Завершённый семестр нельзя менять: уроки в нём доступны только для ручного редактирования")
+    if data.group_id != term.group_id:
+        raise HTTPException(status_code=400, detail="Проверьте группу и дату начала семестра")
+    from datetime import timedelta
+    calculated_end = data.start_date + timedelta(days=max(1, int(term.weeks or 1)) * 7 - 1)
+    overlaps = db.query(models.GroupTerm).filter(
+        models.GroupTerm.id != term.id,
+        models.GroupTerm.group_id == term.group_id,
+        models.GroupTerm.is_active.is_(True),
+        models.GroupTerm.start_date <= calculated_end,
+        models.GroupTerm.end_date >= data.start_date,
+    ).first()
+    if overlaps:
+        raise HTTPException(status_code=409, detail=f"Даты пересекаются с периодом «{overlaps.name}» этой группы")
+    year = db.query(models.AcademicYear).filter_by(id=term.academic_year_id).first()
+    term.name = data.name.strip() or term.name
+    term.start_date = data.start_date
+    term.end_date = calculated_end
+    term.start_week = max(1, ((data.start_date - year.start_date).days // 7) + 1)
+    # A date shift must not silently change the configured semester length.
+    # The legacy weeks field remains the source of truth for duration.
+    db.commit(); db.refresh(term)
+    return term
+
+
+@app.post("/group-terms/{term_id}/lock", response_model=schemas.GroupTermOut)
+def lock_group_term(term_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    term = db.query(models.GroupTerm).filter_by(id=term_id).first()
+    if not term: raise HTTPException(status_code=404, detail="Семестр не найден")
+    term.is_locked = True
+    db.commit(); db.refresh(term)
+    return term
+
+
 # ----------------- ПРЕДМЕТЫ -----------------
 @app.get("/subjects/", response_model=List[schemas.SubjectOut])
 def get_subjects(db: Session = Depends(database.get_db)):
@@ -489,6 +602,10 @@ def delete_subject(subject_id: int, db: Session = Depends(database.get_db)):
 # ----------------- УЧЕБНЫЕ ПЛАНЫ -----------------
 @app.post("/course_plans/", response_model=schemas.CoursePlanOut)
 def create_course_plan(plan: schemas.CoursePlanCreate, db: Session = Depends(database.get_db)):
+    if plan.term_id:
+        term = db.query(models.GroupTerm).filter_by(id=plan.term_id, group_id=plan.group_id).first()
+        if not term:
+            raise HTTPException(status_code=400, detail="Выбранный семестр не принадлежит этой группе")
     db_plan = models.CoursePlan(**plan.dict())
     db.add(db_plan)
     db.commit()
@@ -504,12 +621,15 @@ def read_course_plans(skip: int = 0, limit: int = 100, db: Session = Depends(dat
 @app.put("/course_plans/{plan_id}", response_model=schemas.CoursePlanOut)
 def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, db: Session = Depends(database.get_db)):
     plan = db.query(models.CoursePlan).filter(models.CoursePlan.id == plan_id).first()
+    if plan_data.term_id and not db.query(models.GroupTerm).filter_by(id=plan_data.term_id, group_id=plan_data.group_id).first():
+        raise HTTPException(status_code=400, detail="Выбранный семестр не принадлежит этой группе")
     plan.subject_name = plan_data.subject_name
     plan.total_hours = plan_data.total_hours
     plan.max_weekly_hours = plan_data.max_weekly_hours
     plan.group_id = plan_data.group_id
     plan.teacher_id = plan_data.teacher_id
     plan.teacher2_id = plan_data.teacher2_id
+    plan.term_id = plan_data.term_id
     db.commit()
     db.refresh(plan)
     return plan
@@ -538,6 +658,13 @@ def get_plans_progress(group_id: Optional[int] = None, db: Session = Depends(dat
             models.ScheduleEntry.subject_name == p.subject_name,
             models.ScheduleEntry.status != 'canceled'
         ).count()
+        if p.term_id:
+            actual_count = db.query(models.ScheduleEntry).filter(
+                models.ScheduleEntry.group_id == p.group_id,
+                models.ScheduleEntry.subject_name == p.subject_name,
+                models.ScheduleEntry.term_id == p.term_id,
+                models.ScheduleEntry.status != 'canceled'
+            ).count()
 
         percentage = round((actual_count / p.total_hours * 100), 1) if p.total_hours > 0 else 0
         result.append({
@@ -705,9 +832,10 @@ def trigger_generation(approve_adjustments: bool = False, db: Session = Depends(
 
 # ----------------- РАСПИСАНИЕ И СТАТУСЫ -----------------
 @app.get("/schedule/", response_model=List[schemas.ScheduleEntryOut])
-def get_schedule(group_id: Optional[int] = None, week_number: int = 1, db: Session = Depends(database.get_db)):
+def get_schedule(group_id: Optional[int] = None, week_number: int = 1, term_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.week_number == week_number)
     if group_id: query = query.filter(models.ScheduleEntry.group_id == group_id)
+    if term_id: query = query.filter(models.ScheduleEntry.term_id == term_id)
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
 
 

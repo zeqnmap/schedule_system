@@ -1,23 +1,37 @@
 const { createApp, ref, computed, onMounted, watch } = Vue;
 createApp({ setup() {
-    const groups = ref([]), teachers = ref([]), plans = ref([]), schedule = ref([]), allSchedule = ref([]), curatorHours = ref([]);
-    const selectedGroupId = ref(null), selectedWeek = ref(1), isArchived = ref(false), isGenerating = ref(false);
+    const groups = ref([]), teachers = ref([]), plans = ref([]), schedule = ref([]), allSchedule = ref([]), curatorHours = ref([]), terms = ref([]);
+    const selectedGroupId = ref(null), selectedTermId = ref(null), selectedWeek = ref(1), isArchived = ref(false), isGenerating = ref(false);
     const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), errorMessage = ref('');
     const currentGroup = computed(() => groups.value.find(gr => Number(gr.id) === Number(selectedGroupId.value)));
     const currentGroupNumber = computed(() => currentGroup.value?.number || '');
     const currentGroupHasSaturday = computed(() => Boolean(currentGroup.value?.has_saturday));
     const currentGroupWeeklyHours = computed(() => currentGroup.value?.weekly_hours || 30);
     const currentGroupSemesterWeeks = computed(() => currentGroup.value?.semester_weeks || 20);
+    const currentGroupTerms = computed(() => terms.value
+        .filter(term => Number(term.group_id) === Number(selectedGroupId.value))
+        .sort((a, b) => Number(a.term_number || 0) - Number(b.term_number || 0)));
+    const currentTerm = computed(() => currentGroupTerms.value.find(term => Number(term.id) === Number(selectedTermId.value)));
+    const currentTermWeeks = computed(() => { const term = currentTerm.value; return term ? Array.from({ length: term.weeks }, (_, index) => term.start_week + index) : Array.from({ length: currentGroupSemesterWeeks.value }, (_, index) => index + 1); });
     const currentWeekActualHours = computed(() => schedule.value.filter(e => e.status !== 'canceled').length);
     const showSaturday = computed(() => currentGroupHasSaturday.value || schedule.value.some(e => e.day_of_week === 6));
-    const groupPlans = computed(() => plans.value.filter(p => Number(p.group_id) === Number(selectedGroupId.value)));
-    const fetchData = async () => { const [gRes, tRes, pRes, cRes] = await Promise.all([fetch('/groups/'), fetch('/teachers/'), fetch('/course_plans/'), fetch('/curator-hours/')]); if (gRes.ok) { groups.value = await gRes.json(); if (groups.value.length && !selectedGroupId.value) selectedGroupId.value = groups.value[0].id; } if (tRes.ok) teachers.value = await tRes.json(); if (pRes.ok) plans.value = await pRes.json(); if (cRes.ok) curatorHours.value = await cRes.json(); };
-    const fetchSchedule = async () => { if (!selectedGroupId.value) return; const [res, allRes] = await Promise.all([fetch(`/schedule/?group_id=${selectedGroupId.value}&week_number=${selectedWeek.value}`), fetch(`/schedule/?week_number=${selectedWeek.value}`)]); if (res.ok) schedule.value = await res.json(); if (allRes.ok) allSchedule.value = await allRes.json(); };
+    const groupPlans = computed(() => plans.value.filter(p => Number(p.group_id) === Number(selectedGroupId.value) && (!selectedTermId.value || Number(p.term_id) === Number(selectedTermId.value))));
+    const fetchData = async () => { const [gRes, tRes, pRes, cRes, termRes] = await Promise.all([fetch('/groups/'), fetch('/teachers/'), fetch('/course_plans/'), fetch('/curator-hours/'), fetch('/group-terms/')]); if (gRes.ok) { groups.value = await gRes.json(); if (groups.value.length && !selectedGroupId.value) selectedGroupId.value = groups.value[0].id; } if (tRes.ok) teachers.value = await tRes.json(); if (pRes.ok) plans.value = await pRes.json(); if (cRes.ok) curatorHours.value = await cRes.json(); if (termRes.ok) terms.value = await termRes.json(); if (!selectedTermId.value && currentGroupTerms.value.length) selectedTermId.value = currentGroupTerms.value[0].id; };
+    const fetchSchedule = async () => { if (!selectedGroupId.value) return; const termParam = selectedTermId.value ? `&term_id=${selectedTermId.value}` : ''; const [res, allRes] = await Promise.all([fetch(`/schedule/?group_id=${selectedGroupId.value}&week_number=${selectedWeek.value}${termParam}`), fetch(`/schedule/?week_number=${selectedWeek.value}`)]); if (res.ok) schedule.value = await res.json(); if (allRes.ok) allSchedule.value = await allRes.json(); };
     const fetchArchiveStatus = async () => { if (!selectedGroupId.value) return; const res = await fetch(`/archived-weeks/status?group_id=${selectedGroupId.value}&week_number=${selectedWeek.value}`); if (res.ok) isArchived.value = (await res.json()).is_archived; };
     const changeWeeklyHoursPrompt = async () => { const input = prompt(`Введите норму часов в неделю для Группы ${currentGroupNumber.value}:`, currentGroupWeeklyHours.value); if (input === null) return; const parsed = parseInt(input, 10); if (!isNaN(parsed) && parsed >= 2) { const res = await fetch(`/groups/${selectedGroupId.value}/set-weekly-hours`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weekly_hours: parsed }) }); if (res.ok) currentGroup.value.weekly_hours = (await res.json()).weekly_hours; } };
     const toggleSaturdayForGroup = async () => { const res = await fetch(`/groups/${selectedGroupId.value}/toggle-saturday`, { method: 'POST' }); if (res.ok) { currentGroup.value.has_saturday = (await res.json()).has_saturday; await fetchSchedule(); } };
     const toggleArchive = async () => { const res = await fetch('/archived-weeks/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selectedGroupId.value, week_number: selectedWeek.value }) }); if (res.ok) isArchived.value = (await res.json()).is_archived; };
-    watch(selectedGroupId, () => { if (selectedWeek.value > currentGroupSemesterWeeks.value) selectedWeek.value = currentGroupSemesterWeeks.value; else { fetchSchedule(); fetchArchiveStatus(); } });
+    const selectTerm = termId => {
+        const term = currentGroupTerms.value.find(item => Number(item.id) === Number(termId));
+        if (!term) return;
+        selectedTermId.value = term.id;
+        selectedWeek.value = Number(term.start_week || 1);
+        modalMode.value = null;
+        errorMessage.value = '';
+    };
+    watch(selectedGroupId, () => { selectedTermId.value = currentGroupTerms.value[0]?.id || null; });
+    watch(selectedTermId, () => { if (currentTermWeeks.value.length) selectedWeek.value = currentTermWeeks.value[0]; fetchSchedule(); fetchArchiveStatus(); });
     watch(selectedWeek, () => { fetchSchedule(); fetchArchiveStatus(); });
     onMounted(async () => { await fetchData(); await fetchSchedule(); await fetchArchiveStatus(); });
     const getDayName = dayNum => ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'][dayNum - 1];
@@ -46,8 +60,8 @@ createApp({ setup() {
         return [...new Map(rooms).values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     });
     const onPlanChange = () => { const plan = plans.value.find(p => p.id === selectedPlanId.value); if (plan) { form.value.subject_name = plan.subject_name; form.value.teacher_id = plan.teacher_id; form.value.teacher2_id = plan.teacher2_id; updateRoomFromTeacher(); } };
-    const openEditModal = entry => { if (isArchived.value) return; modalMode.value = 'edit'; form.value = { ...entry }; const matchedPlan = plans.value.find(p => p.group_id === entry.group_id && p.subject_name === entry.subject_name); selectedPlanId.value = matchedPlan?.id || null; };
-    const openCreateModal = (day, slot) => { if (isArchived.value || curatorHourAt(day, slot)) return; modalMode.value = 'create'; selectedPlanId.value = null; const teacher = teachers.value[0]; form.value = { week_number: selectedWeek.value, day_of_week: day, time_slot: slot, teacher_id: teacher?.id || null, teacher2_id: null, group_id: Number(selectedGroupId.value), subject_name: '', status: 'planned', room_name: teacher?.room_name || 'Не назначен' }; };
+    const openEditModal = entry => { if (isArchived.value) return; modalMode.value = 'edit'; form.value = { ...entry }; const matchedPlan = plans.value.find(p => p.group_id === entry.group_id && p.term_id === entry.term_id && p.subject_name === entry.subject_name); selectedPlanId.value = matchedPlan?.id || null; };
+    const openCreateModal = (day, slot) => { if (isArchived.value || curatorHourAt(day, slot)) return; modalMode.value = 'create'; selectedPlanId.value = null; const teacher = teachers.value[0]; form.value = { week_number: selectedWeek.value, term_id: selectedTermId.value, day_of_week: day, time_slot: slot, teacher_id: teacher?.id || null, teacher2_id: null, group_id: Number(selectedGroupId.value), subject_name: '', status: 'planned', room_name: teacher?.room_name || 'Не назначен' }; };
     const saveEntry = async () => { const url = modalMode.value === 'edit' ? `/schedule/${form.value.id}` : '/schedule/'; const response = await fetch(url, { method: modalMode.value === 'edit' ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form.value) }); if (!response.ok) { const data = await response.json().catch(() => ({})); errorMessage.value = data.detail || 'Не удалось сохранить занятие'; return; } await fetchSchedule(); modalMode.value = null; };
     const deleteEntry = async () => { if (!confirm('ВНИМАНИЕ! Это полностью сотрет урок из базы. Продолжить?')) return; await fetch(`/schedule/${form.value.id}`, { method: 'DELETE' }); await fetchSchedule(); modalMode.value = null; };
     const cancelEntry = async () => { await fetch(`/schedule/${form.value.id}/cancel`, { method: 'POST' }); await fetchSchedule(); modalMode.value = null; };
@@ -75,5 +89,5 @@ createApp({ setup() {
         if (!selectedDate) { alert('Введите дату в формате ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.'); return; }
         window.open(`/export/teachers.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(selectedDate)}`, '_blank');
     };
-    return { groups, teachers, plans, schedule, allSchedule, curatorHours, selectedGroupId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, curatorRoomName, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf, exportTeachersPdf };
+    return { groups, teachers, plans, schedule, allSchedule, curatorHours, terms, selectedGroupId, selectedTermId, selectedWeek, isArchived, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, selectTerm, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, curatorRoomName, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf, exportTeachersPdf };
 } }).component('searchable-select', SearchableSelect).mount('#app');

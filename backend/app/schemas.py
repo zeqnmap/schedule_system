@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import date
 
 
 class RoomBase(BaseModel):
@@ -66,6 +67,7 @@ class CoursePlanBase(BaseModel):
     teacher_id: int
     group_id: int
     teacher2_id: Optional[int] = None
+    term_id: Optional[int] = None
 
 
 class CoursePlanCreate(CoursePlanBase): pass
@@ -87,6 +89,7 @@ class ScheduleEntryBase(BaseModel):
     group_id: int
     subject_name: str
     status: str = "planned"  # <--- ДОБАВЛЕНО
+    term_id: Optional[int] = None
 
 
 class ScheduleEntryCreate(ScheduleEntryBase): pass
@@ -108,6 +111,7 @@ class ScheduleEntryUpdate(BaseModel):
     group_id: int
     subject_name: str
     status: str = "planned"
+    term_id: Optional[int] = None
 
     class Config: from_attributes = True
 
@@ -121,6 +125,28 @@ class ArchivedWeekOut(BaseModel):
     group_id: int
     week_number: int
     is_archived: bool
+
+    class Config: from_attributes = True
+
+
+class GroupTermBase(BaseModel):
+    group_id: int
+    term_number: int
+    name: str
+    start_date: date
+    end_date: date
+    is_active: bool = True
+
+
+class GroupTermCreate(GroupTermBase): pass
+
+
+class GroupTermOut(GroupTermBase):
+    id: int
+    academic_year_id: int
+    start_week: int
+    weeks: int
+    is_locked: bool
 
     class Config: from_attributes = True
 

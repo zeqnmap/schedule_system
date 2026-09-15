@@ -55,6 +55,11 @@
                     </div>
 
                     <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Семестр</label>
+                        <select v-model.number="form.term_id" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer"><option :value="null">Выберите семестр</option><option v-for="term in termsForForm" :key="term.id" :value="term.id">{{ term.name }} · {{ formatDate(term.start_date) }} — {{ formatDate(term.end_date) }}</option></select>
+                    </div>
+
+                    <div>
                         <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Дисциплина</label>
                         <searchable-select v-model="form.subject_name" :options="subjects" option-value="name" option-label="name"
                             placeholder="Выберите предмет..." search-placeholder="Найти предмет..." required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-base cursor-pointer"></searchable-select>
@@ -114,6 +119,7 @@
                             </div>
                             <div class="flex items-center gap-3 text-sm font-semibold text-slate-500">
                                 <span class="bg-slate-800 text-white px-2.5 py-0.5 rounded-md text-[11px] font-bold">Гр. {{ getGroupNumber(p.group_id) }}</span>
+                                <span class="bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-md text-[11px] font-bold">{{ getTermName(p.term_id) }}</span>
                                 <span>{{ getTeacherName(p.teacher_id) }} <template v-if="p.teacher2_id">+ {{ getTeacherName(p.teacher2_id) }}</template></span>
                             </div>
                         </div>
