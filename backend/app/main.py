@@ -75,9 +75,20 @@ with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE group_terms ADD COLUMN start_date DATE"))
     if "end_date" not in term_columns:
         connection.execute(text("ALTER TABLE group_terms ADD COLUMN end_date DATE"))
+    plan_columns = {column["name"] for column in inspect(database.engine).get_columns("course_plans")}
+    schedule_columns = {column["name"] for column in inspect(database.engine).get_columns("schedule_entries")}
+    archive_columns = {column["name"] for column in inspect(database.engine).get_columns("archived_weeks")}
+    if "academic_year_id" not in plan_columns:
+        connection.execute(text("ALTER TABLE course_plans ADD COLUMN academic_year_id INTEGER"))
+    if "academic_year_id" not in schedule_columns:
+        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN academic_year_id INTEGER"))
+    if "academic_year_id" not in archive_columns:
+        connection.execute(text("ALTER TABLE archived_weeks ADD COLUMN academic_year_id INTEGER"))
     connection.execute(text("UPDATE group_terms SET start_date = COALESCE(start_date, '2026-09-01'), end_date = COALESCE(end_date, date('2026-09-01', '+' || (start_week + weeks - 2) || ' days'))"))
     connection.execute(text("UPDATE course_plans SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = course_plans.group_id AND group_terms.term_number = 1 LIMIT 1) WHERE term_id IS NULL"))
+    connection.execute(text("UPDATE course_plans SET academic_year_id = (SELECT academic_year_id FROM group_terms WHERE group_terms.id = course_plans.term_id) WHERE academic_year_id IS NULL"))
     connection.execute(text("UPDATE schedule_entries SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = schedule_entries.group_id AND schedule_entries.week_number >= group_terms.start_week AND schedule_entries.week_number < group_terms.start_week + group_terms.weeks ORDER BY group_terms.term_number LIMIT 1) WHERE term_id IS NULL"))
+    connection.execute(text("UPDATE schedule_entries SET academic_year_id = (SELECT academic_year_id FROM group_terms WHERE group_terms.id = schedule_entries.term_id) WHERE academic_year_id IS NULL"))
 
 app = FastAPI(title="Schedule System API")
 
@@ -646,6 +657,7 @@ def create_course_plan(plan: schemas.CoursePlanCreate, db: Session = Depends(dat
         term = db.query(models.GroupTerm).filter_by(id=plan.term_id, group_id=plan.group_id).first()
         if not term:
             raise HTTPException(status_code=400, detail="Выбранный семестр не принадлежит этой группе")
+        plan.academic_year_id = term.academic_year_id
     db_plan = models.CoursePlan(**plan.dict())
     db.add(db_plan)
     db.commit()
@@ -654,8 +666,10 @@ def create_course_plan(plan: schemas.CoursePlanCreate, db: Session = Depends(dat
 
 
 @app.get("/course_plans/", response_model=List[schemas.CoursePlanOut])
-def read_course_plans(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
-    return db.query(models.CoursePlan).offset(skip).limit(limit).all()
+def read_course_plans(skip: int = 0, limit: int = 100, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+    query = db.query(models.CoursePlan)
+    if academic_year_id: query = query.filter(models.CoursePlan.academic_year_id == academic_year_id)
+    return query.offset(skip).limit(limit).all()
 
 
 @app.put("/course_plans/{plan_id}", response_model=schemas.CoursePlanOut)
@@ -670,6 +684,10 @@ def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, db: Se
     plan.teacher_id = plan_data.teacher_id
     plan.teacher2_id = plan_data.teacher2_id
     plan.term_id = plan_data.term_id
+    if plan_data.term_id:
+        plan.academic_year_id = db.query(models.GroupTerm).filter_by(id=plan_data.term_id).first().academic_year_id
+    else:
+        plan.academic_year_id = None
     db.commit()
     db.refresh(plan)
     return plan
@@ -683,9 +701,10 @@ def delete_course_plan(plan_id: int, db: Session = Depends(database.get_db)):
 
 
 @app.get("/plans-progress/")
-def get_plans_progress(group_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+def get_plans_progress(group_id: Optional[int] = None, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     query = db.query(models.CoursePlan)
     if group_id: query = query.filter(models.CoursePlan.group_id == group_id)
+    if academic_year_id: query = query.filter(models.CoursePlan.academic_year_id == academic_year_id)
     plans = query.all()
     groups_dict = {g.id: g.number for g in db.query(models.Group).all()}
     teachers_dict = {t.id: t.name for t in db.query(models.Teacher).all()}
@@ -912,10 +931,11 @@ def trigger_generation(approve_adjustments: bool = False, db: Session = Depends(
 
 # ----------------- РАСПИСАНИЕ И СТАТУСЫ -----------------
 @app.get("/schedule/", response_model=List[schemas.ScheduleEntryOut])
-def get_schedule(group_id: Optional[int] = None, week_number: int = 1, term_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+def get_schedule(group_id: Optional[int] = None, week_number: int = 1, term_id: Optional[int] = None, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.week_number == week_number)
     if group_id: query = query.filter(models.ScheduleEntry.group_id == group_id)
     if term_id: query = query.filter(models.ScheduleEntry.term_id == term_id)
+    if academic_year_id: query = query.filter(models.ScheduleEntry.academic_year_id == academic_year_id)
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
 
 
@@ -1239,6 +1259,9 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
 @app.post("/schedule/", response_model=schemas.ScheduleEntryOut)
 def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session = Depends(database.get_db)):
     ensure_week_editable(entry_data.group_id, entry_data.week_number, db)
+    if entry_data.term_id:
+        term = db.query(models.GroupTerm).filter_by(id=entry_data.term_id, group_id=entry_data.group_id).first()
+        if term: entry_data.academic_year_id = term.academic_year_id
     validate_schedule_conflicts(entry_data, db)
     new_entry = models.ScheduleEntry(**entry_data.dict())
     db.add(new_entry)
@@ -1253,6 +1276,9 @@ def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdat
         raise HTTPException(status_code=404, detail="Занятие не найдено")
     ensure_week_editable(entry.group_id, entry.week_number, db)
     ensure_week_editable(update_data.group_id, update_data.week_number, db)
+    if update_data.term_id:
+        term = db.query(models.GroupTerm).filter_by(id=update_data.term_id, group_id=update_data.group_id).first()
+        if term: update_data.academic_year_id = term.academic_year_id
     validate_schedule_conflicts(update_data, db, exclude_entry_id=entry_id)
     for key, value in update_data.dict().items(): setattr(entry, key, value)
     db.commit()

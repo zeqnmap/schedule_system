@@ -5,7 +5,8 @@ createApp({ setup() {
     const form = ref({ group_id: null, term_id: null, subject_name: '', total_hours: null, max_weekly_hours: 4, teacher_id: null, teacher2_id: null });
     const errorMessage = ref('');
     const fetchData = async () => { try {
-        const [gRes, sRes, tRes, pRes, termRes] = await Promise.all([fetch('/groups/'), fetch('/subjects/'), fetch('/teachers/'), fetch('/course_plans/'), fetch('/group-terms/')]);
+        const yearId = localStorage.getItem('edusync-academic-year-id'); const yearParam = yearId ? `?academic_year_id=${yearId}` : '';
+        const [gRes, sRes, tRes, pRes, termRes] = await Promise.all([fetch('/groups/'), fetch('/subjects/'), fetch('/teachers/'), fetch(`/course_plans/${yearParam}`), fetch(`/group-terms/${yearParam}`)]);
         if (gRes.ok) groups.value = await gRes.json(); if (sRes.ok) subjects.value = await sRes.json(); if (tRes.ok) teachers.value = await tRes.json(); if (pRes.ok) plans.value = await pRes.json(); if (termRes.ok) terms.value = await termRes.json();
     } catch (e) { errorMessage.value = 'Ошибка подключения к серверу API'; } };
     onMounted(fetchData);

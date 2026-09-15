@@ -68,6 +68,7 @@ class CoursePlanBase(BaseModel):
     group_id: int
     teacher2_id: Optional[int] = None
     term_id: Optional[int] = None
+    academic_year_id: Optional[int] = None
 
 
 class CoursePlanCreate(CoursePlanBase): pass
@@ -90,6 +91,7 @@ class ScheduleEntryBase(BaseModel):
     subject_name: str
     status: str = "planned"  # <--- ДОБАВЛЕНО
     term_id: Optional[int] = None
+    academic_year_id: Optional[int] = None
 
 
 class ScheduleEntryCreate(ScheduleEntryBase): pass
@@ -112,6 +114,7 @@ class ScheduleEntryUpdate(BaseModel):
     subject_name: str
     status: str = "planned"
     term_id: Optional[int] = None
+    academic_year_id: Optional[int] = None
 
     class Config: from_attributes = True
 
@@ -119,10 +122,12 @@ class ScheduleEntryUpdate(BaseModel):
 class ArchivedWeekToggle(BaseModel):
     group_id: int
     week_number: int
+    academic_year_id: Optional[int] = None
 
 
 class ArchivedWeekAllToggle(BaseModel):
     week_number: int
+    academic_year_id: Optional[int] = None
 
 
 class ArchivedWeekOut(BaseModel):

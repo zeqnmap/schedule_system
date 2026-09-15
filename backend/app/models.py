@@ -49,6 +49,7 @@ class CoursePlan(Base):
     teacher_id = Column(Integer, ForeignKey("teachers.id"))
     teacher2_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
     term_id = Column(Integer, ForeignKey("group_terms.id"), nullable=True, index=True)
+    academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=True, index=True)
 
     group = relationship("Group", back_populates="course_plans")
     teacher = relationship("Teacher", foreign_keys=[teacher_id])
@@ -68,6 +69,7 @@ class ScheduleEntry(Base):
     subject_name = Column(String)
     status = Column(String, default="planned") # <--- НОВАЯ ЛОГИКА (planned / canceled)
     term_id = Column(Integer, ForeignKey("group_terms.id"), nullable=True, index=True)
+    academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=True, index=True)
 
     group = relationship("Group", back_populates="schedule_entries")
     term = relationship("GroupTerm", back_populates="schedule_entries")
@@ -107,6 +109,7 @@ class ArchivedWeek(Base):
     group_id = Column(Integer, ForeignKey("groups.id"))
     week_number = Column(Integer)
     is_archived = Column(Boolean, default=False)
+    academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=True, index=True)
 
 class Subject(Base):
     __tablename__ = "subjects"
