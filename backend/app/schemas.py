@@ -121,6 +121,10 @@ class ArchivedWeekToggle(BaseModel):
     week_number: int
 
 
+class ArchivedWeekAllToggle(BaseModel):
+    week_number: int
+
+
 class ArchivedWeekOut(BaseModel):
     group_id: int
     week_number: int

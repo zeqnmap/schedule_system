@@ -813,6 +813,19 @@ def get_archive_status(group_id: int, week_number: int, db: Session = Depends(da
     record = db.query(models.ArchivedWeek).filter_by(group_id=group_id, week_number=week_number).first()
     return {"is_archived": record.is_archived if record else False}
 
+@app.get("/archived-weeks/status-all")
+def get_archive_status_all(week_number: int, db: Session = Depends(database.get_db)):
+    """Return whether the selected week is locked for every current group."""
+    group_ids = [row[0] for row in db.query(models.Group.id).all()]
+    if not group_ids:
+        return {"is_archived": False, "archived_count": 0, "total_groups": 0}
+    archived_count = db.query(models.ArchivedWeek).filter(
+        models.ArchivedWeek.week_number == week_number,
+        models.ArchivedWeek.group_id.in_(group_ids),
+        models.ArchivedWeek.is_archived.is_(True),
+    ).count()
+    return {"is_archived": archived_count == len(group_ids), "archived_count": archived_count, "total_groups": len(group_ids)}
+
 @app.post("/archived-weeks/toggle")
 def toggle_archive(data: schemas.ArchivedWeekToggle, db: Session = Depends(database.get_db)):
     record = db.query(models.ArchivedWeek).filter_by(group_id=data.group_id, week_number=data.week_number).first()
@@ -820,6 +833,33 @@ def toggle_archive(data: schemas.ArchivedWeekToggle, db: Session = Depends(datab
     else: db.add(models.ArchivedWeek(group_id=data.group_id, week_number=data.week_number, is_archived=True))
     db.commit()
     return {"is_archived": record.is_archived if record else True}
+
+def ensure_week_editable(group_id: int, week_number: int, db: Session):
+    record = db.query(models.ArchivedWeek).filter_by(group_id=group_id, week_number=week_number).first()
+    if record and record.is_archived:
+        raise HTTPException(status_code=423, detail="Эта неделя заблокирована для изменений")
+
+@app.post("/archived-weeks/toggle-all")
+def toggle_archive_all(data: schemas.ArchivedWeekAllToggle, db: Session = Depends(database.get_db)):
+    """Lock/unlock one week for every group atomically."""
+    group_ids = [row[0] for row in db.query(models.Group.id).all()]
+    if not group_ids:
+        return {"is_archived": False, "archived_count": 0, "total_groups": 0}
+    records = db.query(models.ArchivedWeek).filter(
+        models.ArchivedWeek.week_number == data.week_number,
+        models.ArchivedWeek.group_id.in_(group_ids),
+    ).all()
+    by_group = {record.group_id: record for record in records}
+    all_archived = all(by_group.get(group_id) and by_group[group_id].is_archived for group_id in group_ids)
+    target_state = not all_archived
+    for group_id in group_ids:
+        record = by_group.get(group_id)
+        if record:
+            record.is_archived = target_state
+        else:
+            db.add(models.ArchivedWeek(group_id=group_id, week_number=data.week_number, is_archived=target_state))
+    db.commit()
+    return {"is_archived": target_state, "archived_count": len(group_ids) if target_state else 0, "total_groups": len(group_ids)}
 
 @app.post("/generate_schedule/", response_model=schemas.GenerateResponse)
 def trigger_generation(approve_adjustments: bool = False, db: Session = Depends(database.get_db)):
@@ -1158,6 +1198,7 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
 
 @app.post("/schedule/", response_model=schemas.ScheduleEntryOut)
 def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session = Depends(database.get_db)):
+    ensure_week_editable(entry_data.group_id, entry_data.week_number, db)
     validate_schedule_conflicts(entry_data, db)
     new_entry = models.ScheduleEntry(**entry_data.dict())
     db.add(new_entry)
@@ -1170,6 +1211,8 @@ def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdat
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Занятие не найдено")
+    ensure_week_editable(entry.group_id, entry.week_number, db)
+    ensure_week_editable(update_data.group_id, update_data.week_number, db)
     validate_schedule_conflicts(update_data, db, exclude_entry_id=entry_id)
     for key, value in update_data.dict().items(): setattr(entry, key, value)
     db.commit()
@@ -1178,7 +1221,11 @@ def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdat
 
 @app.delete("/schedule/{entry_id}")
 def delete_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
-    db.query(models.ScheduleEntry).filter_by(id=entry_id).delete()
+    entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Занятие не найдено")
+    ensure_week_editable(entry.group_id, entry.week_number, db)
+    db.delete(entry)
     db.commit()
     return {"ok": True}
 
@@ -1186,6 +1233,9 @@ def delete_schedule_entry(entry_id: int, db: Session = Depends(database.get_db))
 @app.post("/schedule/{entry_id}/cancel", response_model=schemas.ScheduleEntryOut)
 def cancel_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Занятие не найдено")
+    ensure_week_editable(entry.group_id, entry.week_number, db)
     entry.status = "canceled"
     db.commit()
     db.refresh(entry)
@@ -1194,6 +1244,9 @@ def cancel_schedule_entry(entry_id: int, db: Session = Depends(database.get_db))
 @app.post("/schedule/{entry_id}/restore", response_model=schemas.ScheduleEntryOut)
 def restore_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Занятие не найдено")
+    ensure_week_editable(entry.group_id, entry.week_number, db)
     entry.status = "planned"
     db.commit()
     db.refresh(entry)

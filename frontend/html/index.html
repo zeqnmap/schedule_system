@@ -85,9 +85,14 @@
                     {{ currentGroupHasSaturday ? '📅 6 дней (суббота вкл)' : '☕ 5 дней (без субботы)' }}
                 </button>
             </div>
-            <button @click="toggleArchive" :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-6 py-3.5 rounded-2xl font-extrabold text-sm border transition-all w-full xl:w-auto">
-                {{ isArchived ? '🔒 Разблокировать неделю' : '📦 Заархивировать' }}
-            </button>
+            <div class="flex flex-col sm:flex-row gap-2 w-full xl:w-auto">
+                <button @click="toggleArchive" :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-4 py-3.5 rounded-2xl font-extrabold text-xs border transition-all w-full sm:w-auto" :title="`Только группа ${currentGroupNumber}`">
+                    {{ isArchived ? '🔓 Группа' : '🔒 Группа' }}
+                </button>
+                <button @click="toggleArchiveAll" :class="isArchivedAll ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-6 py-3.5 rounded-2xl font-extrabold text-sm border transition-all w-full sm:w-auto">
+                    {{ isArchivedAll ? '🔓 Разблокировать все' : '🔒 Заблокировать все' }}
+                </button>
+            </div>
         </div>
 
         <div v-if="isArchived" class="bg-rose-50 border border-rose-200 text-rose-800 px-6 py-4 rounded-2xl mb-10 font-bold text-sm flex items-center gap-3">
