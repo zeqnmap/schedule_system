@@ -701,10 +701,11 @@ def delete_course_plan(plan_id: int, db: Session = Depends(database.get_db)):
 
 
 @app.get("/plans-progress/")
-def get_plans_progress(group_id: Optional[int] = None, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+def get_plans_progress(group_id: Optional[int] = None, academic_year_id: Optional[int] = None, term_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     query = db.query(models.CoursePlan)
     if group_id: query = query.filter(models.CoursePlan.group_id == group_id)
     if academic_year_id: query = query.filter(models.CoursePlan.academic_year_id == academic_year_id)
+    if term_id: query = query.filter(models.CoursePlan.term_id == term_id)
     plans = query.all()
     groups_dict = {g.id: g.number for g in db.query(models.Group).all()}
     teachers_dict = {t.id: t.name for t in db.query(models.Teacher).all()}
@@ -726,11 +727,13 @@ def get_plans_progress(group_id: Optional[int] = None, academic_year_id: Optiona
             ).count()
 
         percentage = round((actual_count / p.total_hours * 100), 1) if p.total_hours > 0 else 0
+        term = db.query(models.GroupTerm).filter_by(id=p.term_id).first() if p.term_id else None
         result.append({
             "plan_id": p.id, "group_id": p.group_id, "group_number": groups_dict.get(p.group_id, str(p.group_id)),
             "subject_name": p.subject_name, "teacher_name": teachers_dict.get(p.teacher_id, "Не назначен"),
             "total_hours": p.total_hours, "scheduled_hours": actual_count, "diff": actual_count - p.total_hours,
-            "percentage": min(percentage, 100.0), "raw_percentage": percentage
+            "percentage": min(percentage, 100.0), "raw_percentage": percentage,
+            "term_id": p.term_id, "term_name": term.name if term else "Семестр не указан"
         })
     return result
 

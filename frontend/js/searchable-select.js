@@ -8,6 +8,7 @@ const SearchableSelect = {
         placeholder: { type: String, default: 'Выберите значение...' },
         searchPlaceholder: { type: String, default: 'Поиск...' },
         formatOption: { type: Function, default: null }
+        ,inline: { type: Boolean, default: false }
     },
     emits: ['update:modelValue', 'change'],
     setup(props, { emit }) {
@@ -30,9 +31,9 @@ const SearchableSelect = {
         return { search, filteredOptions, optionText, optionKey, updateValue };
     },
     template: `
-        <div class="space-y-2">
+        <div :class="inline ? 'flex flex-wrap items-center gap-3 flex-1 min-w-[430px]' : 'space-y-2'">
             <input v-model="search" type="search" :placeholder="searchPlaceholder"
-                   class="input-modern w-full px-4 py-2.5 text-slate-700 font-semibold text-sm" autocomplete="off">
+                   :class="inline ? 'input-modern flex-1 min-w-[190px] px-4 py-2.5 text-slate-700 font-semibold text-sm' : 'input-modern w-full px-4 py-2.5 text-slate-700 font-semibold text-sm'" autocomplete="off">
             <select v-bind="$attrs" :value="modelValue ?? ''" @change="updateValue">
                 <option value="">{{ placeholder }}</option>
                 <option v-for="option in filteredOptions" :key="optionKey(option)" :value="optionKey(option)">{{ optionText(option) }}</option>
