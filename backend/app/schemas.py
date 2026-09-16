@@ -145,6 +145,7 @@ class GroupTermBase(BaseModel):
     name: str
     start_date: date
     end_date: date
+    weeks: Optional[int] = None
     is_active: bool = True
 
 

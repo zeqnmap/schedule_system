@@ -47,7 +47,7 @@
                 </div>
 
                 <form @submit.prevent="saveGroup" class="mb-10 space-y-5">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Группа</label>
                             <input v-model.number="newGroup.number" type="number" required placeholder="Напр. 451" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
@@ -60,10 +60,6 @@
                                 <option value="3">3 курс</option>
                                 <option value="4">4 курс</option>
                             </select>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Недель в 1 сем.</label>
-                            <input v-model.number="newGroup.semester_weeks" type="number" required placeholder="Напр. 17" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg text-center">
                         </div>
                     </div>
 
@@ -86,7 +82,7 @@
                         </div>
                     </div>
 
-                    <section class="semester-panel">
+                    <section class="semester-panel hidden">
                         <div class="flex items-center justify-between gap-4 mb-4"><div><h3 class="font-black text-lg text-slate-900">Семестры группы</h3><p class="text-xs font-semibold text-slate-400 mt-1">Периоды с разными датами и каникулами.</p></div><span v-if="editingGroupId" class="text-xs font-black text-emerald-700">Группа {{ newGroup.number }}</span></div>
                         <div v-if="editingGroupId" class="grid gap-3 md:grid-cols-2"><div v-for="term in groupTerms" :key="term.id" class="semester-item"><div><strong>{{ term.name }}</strong><p>{{ formatDate(term.start_date) }} — {{ formatDate(termEnd(term)) }} · {{ termWeeks(term) }} нед.</p></div><div class="flex items-center gap-2"><button v-if="!term.is_locked" type="button" @click.stop="editTerm(term)" class="semester-edit">Даты</button><button v-if="!term.is_locked" type="button" @click.stop="lockTerm(term)" class="semester-lock">Завершить</button><span v-else class="semester-locked">Завершён</span></div></div></div>
                         <div v-if="editingTermId" class="semester-editor mt-4"><div class="flex items-center justify-between mb-3"><strong>Сдвинуть период: {{ editingTermName }}</strong><button @click="cancelTermEdit" type="button">✕</button></div><div class="grid gap-3 md:grid-cols-[1fr_1fr_auto]"><label><span>Начало семестра</span><input v-model="termForm.start_date" type="date" class="input-modern px-4 py-3 text-sm font-bold"></label><label><span>Окончание рассчитывается автоматически</span><input :value="calculatedTermEnd" type="text" readonly class="input-modern px-4 py-3 text-sm font-bold"></label><button @click="saveTermDates" type="button" class="btn-emerald rounded-2xl px-5 font-extrabold self-end">Сохранить дату</button></div></div>
@@ -110,7 +106,6 @@
                             <div class="flex items-center gap-3 mb-1.5">
                                 <h3 class="font-black text-2xl text-slate-900 tracking-tight">Группа {{ g.number }}</h3>
                                 <span class="bg-slate-100 text-slate-700 font-extrabold text-[10px] px-2.5 py-1 rounded-lg uppercase tracking-widest">{{ g.course }} курс</span>
-                                <span class="bg-emerald-50 text-emerald-700 font-extrabold text-[10px] px-2.5 py-1 rounded-lg uppercase tracking-widest">{{ g.semester_weeks }} нед.</span>
                             </div>
                             <div class="text-xs font-bold" :class="g.has_saturday ? 'text-indigo-500' : 'text-slate-400'">
                                 {{ g.has_saturday ? '📅 6 дней (с субботой)' : '☕ 5 дней (без субботы)' }}

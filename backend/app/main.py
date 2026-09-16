@@ -582,8 +582,9 @@ def create_group_term(data: schemas.GroupTermCreate, _: models.User = Depends(re
     if overlap:
         raise HTTPException(status_code=409, detail=f"Даты пересекаются с периодом «{overlap.name}» этой группы")
     start_week = max(1, ((data.start_date - year.start_date).days // 7) + 1)
-    weeks = max(1, ((data.end_date - data.start_date).days // 7) + 1)
-    term = models.GroupTerm(academic_year_id=year.id, group_id=data.group_id, term_number=data.term_number, name=data.name, start_week=start_week, weeks=weeks, start_date=data.start_date, end_date=data.end_date, is_active=True, is_locked=False)
+    weeks = max(1, int(data.weeks or ((data.end_date - data.start_date).days // 7) + 1))
+    end_date = data.start_date + __import__('datetime').timedelta(days=weeks * 7 - 1)
+    term = models.GroupTerm(academic_year_id=year.id, group_id=data.group_id, term_number=data.term_number, name=data.name, start_week=start_week, weeks=weeks, start_date=data.start_date, end_date=end_date, is_active=True, is_locked=False)
     db.add(term); db.commit(); db.refresh(term)
     return term
 
@@ -598,7 +599,8 @@ def update_group_term(term_id: int, data: schemas.GroupTermCreate, _: models.Use
     if data.group_id != term.group_id:
         raise HTTPException(status_code=400, detail="Проверьте группу и дату начала семестра")
     from datetime import timedelta
-    calculated_end = data.start_date + timedelta(days=max(1, int(term.weeks or 1)) * 7 - 1)
+    weeks = max(1, int(data.weeks or term.weeks or 1))
+    calculated_end = data.start_date + timedelta(days=weeks * 7 - 1)
     overlaps = db.query(models.GroupTerm).filter(
         models.GroupTerm.id != term.id,
         models.GroupTerm.group_id == term.group_id,
@@ -613,6 +615,7 @@ def update_group_term(term_id: int, data: schemas.GroupTermCreate, _: models.Use
     term.start_date = data.start_date
     term.end_date = calculated_end
     term.start_week = max(1, ((data.start_date - year.start_date).days // 7) + 1)
+    term.weeks = weeks
     # A date shift must not silently change the configured semester length.
     # The legacy weeks field remains the source of truth for duration.
     db.commit(); db.refresh(term)
@@ -626,6 +629,14 @@ def lock_group_term(term_id: int, _: models.User = Depends(require_admin), db: S
     term.is_locked = True
     db.commit(); db.refresh(term)
     return term
+
+@app.delete("/group-terms/{term_id}")
+def delete_group_term(term_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    term = db.query(models.GroupTerm).filter_by(id=term_id).first()
+    if not term: raise HTTPException(status_code=404, detail="Семестр не найден")
+    if term.is_locked: raise HTTPException(status_code=409, detail="Завершённый семестр нельзя удалить")
+    db.delete(term); db.commit()
+    return {"ok": True}
 
 
 # ----------------- ПРЕДМЕТЫ -----------------
