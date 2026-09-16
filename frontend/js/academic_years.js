@@ -1,4 +1,5 @@
 const { createApp, ref, computed, onMounted, watch } = Vue;
+document.body.classList.add('academic-years-page');
 createApp({ setup() {
     const years = ref([]), groups = ref([]), terms = ref([]), selectedGroupId = ref(null), form = ref({ name: '', start_date: '', end_date: '' }), termForm = ref({ start_date: '', weeks: 20 }), editingId = ref(null), editingTermId = ref(null), errorMessage = ref('');
     const activeYearId = computed(() => years.value.find(year => year.is_active)?.id || null);
