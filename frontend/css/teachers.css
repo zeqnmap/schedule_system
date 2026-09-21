@@ -20,3 +20,10 @@ body.dark-theme .teacher-vacation-calendar { border-color: #454545; background: 
 body.dark-theme .calendar-nav { background: #303030; color: #e5e7eb; }
 body.dark-theme .teacher-calendar-day { color: #d4d4d4; }
 body.dark-theme .teacher-calendar-day--between { background: #173d32; color: #6ee7b7; }
+body.dark-theme .teacher-vacation-panel { background: #242424; border-color: #454545; }
+body.dark-theme .teacher-vacation-panel .text-slate-700 { color: #e5e7eb; }
+body.dark-theme .teacher-vacation-panel .bg-white { background: #303030; }
+body.dark-theme .teacher-vacation-panel .border-slate-200 { border-color: #454545; }
+body.dark-theme .teacher-vacation-panel .text-slate-600,
+body.dark-theme .teacher-vacation-panel .text-slate-500 { color: #d4d4d4; }
+body.dark-theme .teacher-vacation-panel .input-modern { background: #1d1d1d; border-color: #454545; color: #e5e7eb; }
