@@ -118,7 +118,7 @@
 
                     <!-- Карточки (Слои накладываются друг на друга) -->
                     <div v-for="(entry, idx) in getEntries(day, slot)" :key="entry.id" class="lesson-action-shell"
-                         :class="{ 'lesson-action-shell--open': activeCardId === entry.id }" @mouseleave="activeCardId = null">
+                         :class="{ 'lesson-action-shell--open': activeCardId === entry.id, 'lesson-action-shell--canceled': entry.status === 'canceled', 'lesson-action-shell--replacement': entry.status !== 'canceled' && getEntries(day, slot).some(item => item.status === 'canceled') }" @mouseleave="activeCardId = null">
                         <div v-if="!isArchived" class="lesson-action-menu" @click.stop>
                             <button @click="deleteCardEntry(entry)" class="lesson-action-button lesson-action-button--delete">Удалить</button>
                             <button v-if="entry.status !== 'canceled'" @click="cancelCardEntry(entry)" class="lesson-action-button lesson-action-button--cancel">Отменить</button>
@@ -130,8 +130,7 @@
                          :class="[
                             isArchived ? 'opacity-80 cursor-not-allowed' : '',
                             entry.status === 'canceled' ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200',
-                            /* Если это болезнь И есть замена -> карточка болезни уходит вниз, выглядывает из-под низа */
-                            entry.status === 'canceled' && hasActiveEntry(day, slot) ? 'z-10 transform scale-[0.96] translate-y-3 opacity-60 hover:opacity-100 hover:z-30 hover:scale-100 hover:translate-y-0 shadow-sm' : 'z-20 shadow-sm hover:shadow-md'
+                            entry.status === 'canceled' ? 'z-10 shadow-sm' : 'z-20 shadow-sm hover:shadow-md'
                          ]">
 
                         <div v-if="entry.status === 'canceled'" class="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-30">
