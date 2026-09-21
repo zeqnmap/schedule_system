@@ -6,6 +6,21 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 .btn-emerald:hover { box-shadow: 0 12px 32px -6px rgba(16, 185, 129, 0.5); transform: translateY(-2px); }
 .slot-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 24px; transition: all 0.3s ease; cursor: pointer; position: absolute; overflow: hidden; width: 100%; height: 100%; }
 .slot-card:hover { box-shadow: 0 12px 30px -8px rgba(0,0,0,0.1); }
+.lesson-action-shell { position: absolute; inset: 0; overflow: hidden; border: 1px solid transparent; border-radius: 24px; background: #f8fafc; z-index: 20; transition: border-color .2s ease; }
+.lesson-action-menu { position: absolute; inset: 6px 6px 6px auto; z-index: 10; width: 108px; display: grid; grid-template-columns: 1fr; grid-template-rows: repeat(3, 1fr); gap: 6px; opacity: 0; transform: translateX(20px); pointer-events: none; transition: opacity .16s ease, transform .24s ease; }
+.lesson-action-shell--open { z-index: 40; }
+.lesson-action-shell--open { border-color: #e2e8f0; }
+.lesson-action-shell--open .lesson-action-menu { opacity: 1; transform: translateX(0); pointer-events: auto; }
+.lesson-action-card { z-index: 20; transform: translateX(0); transition: transform .28s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease !important; }
+.lesson-action-shell--open .lesson-action-card { transform: translateX(-116px); box-shadow: 0 10px 24px -16px rgba(15,23,42,.25); }
+.lesson-action-button { display: grid; place-items: center; border-radius: 14px; font-size: 11px; font-weight: 900; transition: transform .16s ease, filter .16s ease; }
+.lesson-action-button:hover, .lesson-action-edit:hover { transform: translateY(-1px); filter: brightness(.96); }
+.lesson-action-button--delete { background: #fff1f2; color: #e11d48; }
+.lesson-action-button--cancel { background: #fff7ed; color: #ea580c; }
+.lesson-action-button--restore { background: #ecfdf5; color: #059669; }
+.lesson-action-edit { border-radius: 9px; background: #e8f0f8; color: #334155; font-size: 10px; font-weight: 900; transition: transform .16s ease, filter .16s ease; }
+body.dark-theme .lesson-action-shell { background: #242424; border-color: #454545; }
+body.dark-theme .lesson-action-edit { background: #303030; color: #e5e7eb; }
 .modal-glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }

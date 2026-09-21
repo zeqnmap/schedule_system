@@ -8,3 +8,15 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 .btn-coral:hover { background-color: #FFE4E6; color: #BE123C; border-color: #FECDD3; }
 ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; } ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 [v-cloak] { display: none; }
+.teacher-vacation-calendar { padding: 10px; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; }
+.calendar-nav { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; background: #f1f5f9; color: #475569; font-weight: 900; }
+.teacher-calendar-day { height: 24px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 7px; color: #475569; font-size: 10px; font-weight: 800; transition: .15s ease; }
+.teacher-calendar-day:hover { border-color: #34d399; color: #047857; }
+.teacher-calendar-day--disabled { cursor: default; opacity: .32; }
+.teacher-calendar-day--disabled:hover { border-color: transparent; color: #475569; }
+.teacher-calendar-day--selected { background: #10b981; color: #fff; }
+.teacher-calendar-day--between { background: #d1fae5; color: #047857; }
+body.dark-theme .teacher-vacation-calendar { border-color: #454545; background: #1d1d1d; }
+body.dark-theme .calendar-nav { background: #303030; color: #e5e7eb; }
+body.dark-theme .teacher-calendar-day { color: #d4d4d4; }
+body.dark-theme .teacher-calendar-day--between { background: #173d32; color: #6ee7b7; }

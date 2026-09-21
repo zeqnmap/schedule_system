@@ -18,6 +18,7 @@ createApp({
         const vacations = ref([]);
         const vacationForm = ref({ start_date: '', end_date: '' });
         const activeYear = ref(null);
+        const vacationMonth = ref('');
 
         const fetchData = async () => {
             const [rRes, tRes, wRes, yRes] = await Promise.all([fetch('/rooms/'), fetch('/teachers/'), fetch('/teachers-workload/'), fetch('/academic-years/')]);
@@ -36,6 +37,10 @@ createApp({
         const getRoomName = id => rooms.value.find(r => r.id === id)?.name || '???';
         const getRoomOccupant = roomId => teachers.value.find(t => t.room_id === roomId)?.name || null;
         const workload = teacher => workloads.value.find(item => item.id === teacher.id) || { assigned_weekly_hours: 0, max_hours_per_week: teacher.max_hours_per_week };
+        const localDate = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+        const selectedVacationMonth = computed(() => new Date(`${vacationMonth.value || activeYear.value?.start_date?.slice(0, 7) || '2026-09'}-01T00:00:00`));
+        const vacationMonthTitle = computed(() => selectedVacationMonth.value.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }));
+        const vacationCalendarDays = computed(() => { const month = selectedVacationMonth.value, first = new Date(month.getFullYear(), month.getMonth(), 1), offset = (first.getDay() + 6) % 7, count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate(); return Array.from({ length: offset + count }, (_, index) => { if (index < offset) return null; const value = localDate(new Date(month.getFullYear(), month.getMonth(), index - offset + 1)); return { value, number: Number(value.slice(-2)), outside: !activeYear.value || value < activeYear.value.start_date || value > activeYear.value.end_date, selected: value === vacationForm.value.start_date || value === vacationForm.value.end_date, between: Boolean(vacationForm.value.start_date && vacationForm.value.end_date && value > vacationForm.value.start_date && value < vacationForm.value.end_date) }; }); });
         const normalizeDays = days => String(days || '1,2,3,4,5').split(',').map(Number).filter(Number.isInteger);
         const formatWorkingDays = days => normalizeDays(days).map(day => weekDays.find(item => item.id === day)?.name).filter(Boolean).join(', ') || 'Дни не выбраны';
 
@@ -77,6 +82,7 @@ createApp({
         const openVacationEditor = teacher => {
             vacationEditorId.value = teacher.id;
             vacationForm.value = { start_date: '', end_date: '' };
+            vacationMonth.value = activeYear.value?.start_date?.slice(0, 7) || '';
         };
         const closeVacationEditor = () => { vacationEditorId.value = null; vacationForm.value = { start_date: '', end_date: '' }; };
         const teacherVacations = teacher => vacations.value.filter(vacation => vacation.teacher_id === teacher.id);
@@ -87,7 +93,10 @@ createApp({
             closeVacationEditor(); await fetchData();
         };
         const deleteVacation = async id => { const response = await fetch(`/teacher-vacations/${id}`, { method: 'DELETE' }); if (response.ok) await fetchData(); };
+        const selectVacationDate = day => { if (!day || day.outside) return; if (!vacationForm.value.start_date || vacationForm.value.end_date) { vacationForm.value = { start_date: day.value, end_date: '' }; return; } vacationForm.value.end_date = day.value >= vacationForm.value.start_date ? day.value : vacationForm.value.start_date; vacationForm.value.start_date = day.value >= vacationForm.value.start_date ? vacationForm.value.start_date : day.value; };
+        const previousVacationMonth = () => { const value = selectedVacationMonth.value; vacationMonth.value = localDate(new Date(value.getFullYear(), value.getMonth() - 1, 1)).slice(0, 7); };
+        const nextVacationMonth = () => { const value = selectedVacationMonth.value; vacationMonth.value = localDate(new Date(value.getFullYear(), value.getMonth() + 1, 1)).slice(0, 7); };
 
-        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, vacationEditorId, vacationForm, activeYear, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacation, deleteVacation, teacherVacations, getRoomName, getRoomOccupant, formatWorkingDays, workload, errorMessage };
+        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, vacationEditorId, vacationForm, activeYear, vacationMonth, vacationMonthTitle, vacationCalendarDays, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacation, deleteVacation, selectVacationDate, previousVacationMonth, nextVacationMonth, teacherVacations, getRoomName, getRoomOccupant, formatWorkingDays, workload, errorMessage };
     }
 }).component('searchable-select', SearchableSelect).mount('#app');
