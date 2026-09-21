@@ -1046,7 +1046,8 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
     bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
     pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
-    group_numbers = {group.id: group.number for group in db.query(models.Group).all()}
+    group_records = {group.id: group for group in db.query(models.Group).all()}
+    group_numbers = {group_id: group.number for group_id, group in group_records.items()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
     curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
     query = db.query(models.ScheduleEntry).filter(
@@ -1111,10 +1112,13 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
             target_groups = [item.group_id] if item.group_id not in (0, None) else [group_id for group_id in group_numbers if (group_id, item.time_slot) not in specific_slots]
             for group_id in target_groups:
                 slot_label = str(item.time_slot) if item.duration == 1 else f"{item.time_slot}-{item.time_slot + item.duration - 1}"
+                group = group_records.get(group_id)
+                curator_teacher_id = item.teacher_id or getattr(group, "curator_teacher_id", None)
+                curator_room = item.room_name or getattr(group, "curator_room_name", None)
                 rows_by_group.setdefault(group_id, []).append((
                     item.time_slot,
                     1,
-                    [str(group_numbers.get(group_id, group_id)), slot_label, "Кураторский час", item.room_name or "-", teachers.get(item.teacher_id, "Куратор не указан")],
+                    [str(group_numbers.get(group_id, group_id)), slot_label, "Кураторский час", curator_room or "-", teachers.get(curator_teacher_id, "Куратор не указан")],
                     True,
                 ))
 
@@ -1174,7 +1178,8 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
     pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
     bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
     pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
-    groups = {group.id: group.number for group in db.query(models.Group).all()}
+    group_records = {group.id: group for group in db.query(models.Group).all()}
+    groups = {group_id: group.number for group_id, group in group_records.items()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
     curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
     query = db.query(models.ScheduleEntry).filter(
@@ -1213,17 +1218,26 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
                     "room": entry.room_name or "—",
                     "curator": False,
                 }
-        for item in (item for item in curator_hours if item.day_of_week == selected_day and item.teacher_id):
+        for item in (item for item in curator_hours if item.day_of_week == selected_day):
             target_groups = [item.group_id] if item.group_id not in (0, None) else list(groups)
-            group_label = ", ".join(f"гр. {groups.get(group_id, group_id)}" for group_id in target_groups)
-            slot_label = str(item.time_slot) if item.duration == 1 else f"{item.time_slot}-{item.time_slot + item.duration - 1}"
-            for slot in range(item.time_slot, item.time_slot + item.duration):
-                rows_by_teacher.setdefault(item.teacher_id, {})[slot] = {
-                    "subject": "Кураторский час",
-                    "group": group_label,
-                    "room": item.room_name or "—",
-                    "curator": True,
-                }
+            for group_id in target_groups:
+                group = group_records.get(group_id)
+                curator_teacher_id = item.teacher_id or getattr(group, "curator_teacher_id", None)
+                curator_room = item.room_name or getattr(group, "curator_room_name", None)
+                if not curator_teacher_id:
+                    continue
+                group_label = f"гр. {groups.get(group_id, group_id)}"
+                for slot in range(item.time_slot, item.time_slot + item.duration):
+                    existing = rows_by_teacher.setdefault(curator_teacher_id, {}).get(slot)
+                    if existing and existing.get("curator"):
+                        existing["group"] = f"{existing['group']}, {group_label}"
+                    else:
+                        rows_by_teacher[curator_teacher_id][slot] = {
+                            "subject": "Кураторский час",
+                            "group": group_label,
+                            "room": curator_room or "—",
+                            "curator": True,
+                        }
 
         lesson_slots = list(range(1, max([entry.time_slot for entry in entries if entry.day_of_week == selected_day] + [item.time_slot + item.duration - 1 for item in curator_hours if item.day_of_week == selected_day] + [12]) + 1))
         rows = [["Преподаватель"] + [str(slot) for slot in lesson_slots]]

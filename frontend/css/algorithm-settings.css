@@ -12,3 +12,13 @@ body.dark-theme .compact-curator-settings form > div.grid {
     border-color: rgba(255, 255, 255, .12) !important;
     background-color: #1d1d1d !important;
 }
+.calendar-nav { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: #f1f5f9; color: #475569; font-size: 18px; font-weight: 900; }
+.algorithm-calendar-day { min-height: 40px; display: grid; place-items: center; border: 1px solid #e2e8f0; border-radius: 10px; color: #334155; font-weight: 800; transition: .15s ease; }
+.algorithm-calendar-day:hover { border-color: #34d399; color: #047857; }
+.algorithm-calendar-day--off { background: #ecfdf5; border-color: #34d399; color: #047857; }
+.algorithm-calendar-day--disabled { cursor: default; opacity: .35; background: #f8fafc; }
+.algorithm-calendar-day--disabled:hover { border-color: #e2e8f0; color: #334155; }
+body.dark-theme .calendar-nav { background: #303030; color: #e5e7eb; }
+body.dark-theme .algorithm-calendar-day { border-color: #454545; color: #e5e7eb; }
+body.dark-theme .algorithm-calendar-day--off { background: #173d32; border-color: #296a54; color: #6ee7b7; }
+body.dark-theme .algorithm-calendar-day--disabled { background: #202020; }
