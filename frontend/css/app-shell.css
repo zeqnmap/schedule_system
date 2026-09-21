@@ -73,6 +73,11 @@ body::before {
 .academic-years-page .bento-card > .grid > .input-modern { min-height: 50px; }
 .academic-years-page main#app > section.space-y-3 { display: flex; flex-direction: column; gap: 16px !important; background: transparent !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; box-shadow: none !important; }
 .academic-years-page main#app > section.space-y-3 > article { margin-top: 0 !important; border-radius: 16px !important; box-shadow: none; }
+.calendar-day { min-height: 42px; display: grid; place-items: center; border: 1px solid #e2e8f0; border-radius: 10px; cursor: pointer; font-weight: 800; color: #334155; transition: .15s ease; }
+.calendar-day:hover { border-color: #10b981; color: #047857; }
+.calendar-day--off { background: #ecfdf5; border-color: #34d399; color: #047857; }
+.calendar-day--disabled { cursor: default; opacity: .38; background: #f8fafc; }
+.calendar-day--disabled:hover { border-color: #e2e8f0; color: #334155; }
 .btn-emerald { background: linear-gradient(135deg, #10b981, #047857) !important; }
 input, select, textarea { accent-color: var(--accent); }
 input:focus, select:focus, textarea:focus { outline-color: #34d399 !important; }
@@ -89,6 +94,9 @@ body.dark-theme .app-nav-link.is-schedule.is-active { background: #0f9f7a; }
 body.dark-theme .app-user, body.dark-theme .theme-toggle { color: #d4d4d4; background: #303030; border-color: rgba(255,255,255,.1); }
 body.dark-theme .bento-card, body.dark-theme .slot-card, body.dark-theme main#app > section, body.dark-theme main#app > div > section, body.dark-theme .rule-card { background-color: #242424 !important; border-color: rgba(255,255,255,.08) !important; box-shadow: 0 18px 45px -28px rgba(0,0,0,.75) !important; }
 body.dark-theme.academic-years-page .bento-card, body.dark-theme.academic-years-page .input-modern { border-color: rgba(255,255,255,.12) !important; }
+body.dark-theme .calendar-day { border-color: #454545; color: #e5e7eb; }
+body.dark-theme .calendar-day--off { background: #173d32; border-color: #296a54; color: #6ee7b7; }
+body.dark-theme .calendar-day--disabled { background: #202020; }
 body.dark-theme .bg-white { background-color: #242424 !important; }
 body.dark-theme .bg-slate-50, body.dark-theme .bg-gray-50 { background-color: #1d1d1d !important; }
 body.dark-theme .bg-slate-100 { background-color: #303030 !important; }

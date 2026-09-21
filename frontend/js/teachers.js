@@ -15,14 +15,17 @@ createApp({
         const newTeacher = ref({ name: '', room_id: null, max_hours_per_week: 30, working_days: defaultWorkingDays });
         const editingTeacherId = ref(null);
         const vacationEditorId = ref(null);
-        const vacationWeeks = ref([]);
-        const semesterWeekOptions = Array.from({ length: 52 }, (_, index) => index + 1);
+        const vacations = ref([]);
+        const vacationForm = ref({ start_date: '', end_date: '' });
+        const activeYear = ref(null);
 
         const fetchData = async () => {
-            const [rRes, tRes, wRes] = await Promise.all([fetch('/rooms/'), fetch('/teachers/'), fetch('/teachers-workload/')]);
+            const [rRes, tRes, wRes, yRes] = await Promise.all([fetch('/rooms/'), fetch('/teachers/'), fetch('/teachers-workload/'), fetch('/academic-years/')]);
             if (rRes.ok) rooms.value = await rRes.json();
             if (tRes.ok) teachers.value = await tRes.json();
             if (wRes.ok) workloads.value = await wRes.json();
+            if (yRes.ok) { const years = await yRes.json(); activeYear.value = years.find(year => year.is_active) || null; }
+            if (activeYear.value) { const vRes = await fetch(`/teacher-vacations/?academic_year_id=${activeYear.value.id}`); if (vRes.ok) vacations.value = await vRes.json(); }
         };
         onMounted(fetchData);
 
@@ -71,20 +74,20 @@ createApp({
             await fetch(`/teachers/${id}`, { method: 'DELETE' });
             fetchData();
         };
-        const normalizeVacationWeeks = weeks => String(weeks || '').split(',').map(Number).filter(Number.isInteger).sort((a, b) => a - b);
         const openVacationEditor = teacher => {
             vacationEditorId.value = teacher.id;
-            vacationWeeks.value = normalizeVacationWeeks(teacher.vacation_weeks);
+            vacationForm.value = { start_date: '', end_date: '' };
         };
-        const closeVacationEditor = () => { vacationEditorId.value = null; vacationWeeks.value = []; };
-        const saveVacationWeeks = async teacher => {
-            const response = await fetch(`/teachers/${teacher.id}/vacation-weeks`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weeks: vacationWeeks.value }) });
-            if (!response.ok) return;
-            const updated = await response.json();
-            teacher.vacation_weeks = updated.vacation_weeks;
-            closeVacationEditor();
+        const closeVacationEditor = () => { vacationEditorId.value = null; vacationForm.value = { start_date: '', end_date: '' }; };
+        const teacherVacations = teacher => vacations.value.filter(vacation => vacation.teacher_id === teacher.id);
+        const saveVacation = async teacher => {
+            if (!activeYear.value || !vacationForm.value.start_date || !vacationForm.value.end_date) return;
+            const response = await fetch('/teacher-vacations/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ teacher_id: teacher.id, academic_year_id: activeYear.value.id, ...vacationForm.value }) });
+            if (!response.ok) { errorMessage.value = (await response.json().catch(() => ({}))).detail || 'Не удалось сохранить отпуск'; return; }
+            closeVacationEditor(); await fetchData();
         };
+        const deleteVacation = async id => { const response = await fetch(`/teacher-vacations/${id}`, { method: 'DELETE' }); if (response.ok) await fetchData(); };
 
-        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, vacationEditorId, vacationWeeks, semesterWeekOptions, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacationWeeks, getRoomName, getRoomOccupant, formatWorkingDays, workload, errorMessage };
+        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, vacationEditorId, vacationForm, activeYear, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacation, deleteVacation, teacherVacations, getRoomName, getRoomOccupant, formatWorkingDays, workload, errorMessage };
     }
 }).component('searchable-select', SearchableSelect).mount('#app');

@@ -145,18 +145,9 @@
                         </div>
                         <p class="text-[10px] text-slate-400 font-semibold">Нажмите на карточку для редактирования</p>
                         <div class="rounded-2xl border border-slate-100 bg-slate-50/60 p-3" @click.stop>
-                            <div class="flex items-center justify-between gap-3">
-                                <div><p class="text-xs font-black text-slate-700">Отпуск по неделям</p><p class="text-[10px] text-slate-400">Эти недели не будут назначаться при генерации</p></div>
-                                <button v-if="vacationEditorId !== t.id" @click="openVacationEditor(t)" type="button" class="rounded-xl bg-white px-3 py-2 text-[11px] font-black text-slate-600 border border-slate-200 hover:border-emerald-300">{{ t.vacation_weeks ? 'Изменить' : 'Выбрать' }}</button>
-                            </div>
-                            <div v-if="vacationEditorId === t.id" class="mt-3">
-                                <div class="grid grid-cols-7 gap-1.5 max-h-36 overflow-y-auto pr-1">
-                                    <label v-for="week in semesterWeekOptions" :key="week" class="flex items-center justify-center rounded-lg border px-1.5 py-1.5 text-[10px] font-black cursor-pointer transition-colors" :class="vacationWeeks.includes(week) ? 'bg-amber-400 text-white border-amber-400' : 'bg-white text-slate-500 border-slate-200 hover:border-amber-300'"><input v-model="vacationWeeks" :value="week" type="checkbox" class="sr-only"><span>{{ week }}</span></label>
-                                </div>
-                                <div class="mt-3 flex gap-2"><button @click="saveVacationWeeks(t)" type="button" class="rounded-xl bg-amber-500 px-3 py-2 text-[11px] font-black text-white hover:bg-amber-600">Сохранить отпуск</button><button @click="closeVacationEditor" type="button" class="rounded-xl bg-white px-3 py-2 text-[11px] font-black text-slate-500 border border-slate-200">Отмена</button></div>
-                            </div>
-                            <p v-else-if="t.vacation_weeks" class="mt-2 text-[10px] font-bold text-amber-700">Недели: {{ t.vacation_weeks }}</p>
-                            <p v-else class="mt-2 text-[10px] font-semibold text-slate-400">Отпуск не назначен</p>
+                            <div class="flex items-center justify-between gap-3"><div><p class="text-xs font-black text-slate-700">Отпуск по датам</p><p class="text-[10px] text-slate-400">Занятия в выбранном периоде будут удалены из сетки и учёта часов.</p></div><button v-if="vacationEditorId !== t.id" @click="openVacationEditor(t)" type="button" class="rounded-xl bg-white px-3 py-2 text-[11px] font-black text-slate-600 border border-slate-200 hover:border-emerald-300">Добавить</button></div>
+                            <div v-if="vacationEditorId === t.id" class="mt-3"><div class="grid grid-cols-2 gap-2"><input v-model="vacationForm.start_date" type="date" class="input-modern px-2 py-2 text-xs font-bold"><input v-model="vacationForm.end_date" type="date" class="input-modern px-2 py-2 text-xs font-bold"></div><div class="mt-3 flex gap-2"><button @click="saveVacation(t)" type="button" class="btn-emerald rounded-xl px-3 py-2 text-[11px] font-black">Сохранить отпуск</button><button @click="closeVacationEditor" type="button" class="rounded-xl bg-white px-3 py-2 text-[11px] font-black text-slate-500 border border-slate-200">Отмена</button></div></div>
+                            <div v-if="teacherVacations(t).length" class="mt-2 space-y-1"><p v-for="vacation in teacherVacations(t)" :key="vacation.id" class="flex justify-between gap-2 text-[10px] font-bold text-emerald-700"><span>{{ vacation.start_date }} — {{ vacation.end_date }}</span><button @click="deleteVacation(vacation.id)" class="text-rose-600">Удалить</button></p></div><p v-else-if="vacationEditorId !== t.id" class="mt-2 text-[10px] font-semibold text-slate-400">Отпуск не назначен</p>
                         </div>
                         <div class="absolute top-4 right-4 flex gap-1.5">
                             <button @click.stop="editTeacher(t)" title="Изменить" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold w-8 h-8 rounded-lg text-xs border border-slate-200">✎</button>

@@ -70,6 +70,7 @@ class ScheduleEntry(Base):
     status = Column(String, default="planned") # <--- НОВАЯ ЛОГИКА (planned / canceled)
     term_id = Column(Integer, ForeignKey("group_terms.id"), nullable=True, index=True)
     academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=True, index=True)
+    schedule_date = Column(Date, nullable=True, index=True)
 
     group = relationship("Group", back_populates="schedule_entries")
     term = relationship("GroupTerm", back_populates="schedule_entries")
@@ -83,6 +84,23 @@ class AcademicYear(Base):
     end_date = Column(Date, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     terms = relationship("GroupTerm", back_populates="academic_year")
+
+
+class AcademicDayOff(Base):
+    __tablename__ = "academic_days_off"
+    id = Column(Integer, primary_key=True, index=True)
+    academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=False, index=True)
+    day_date = Column(Date, nullable=False, index=True)
+    title = Column(String, nullable=True)
+
+
+class TeacherVacation(Base):
+    __tablename__ = "teacher_vacations"
+    id = Column(Integer, primary_key=True, index=True)
+    teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=False, index=True)
+    academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=False, index=True)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
 
 
 class GroupTerm(Base):

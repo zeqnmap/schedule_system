@@ -92,6 +92,7 @@ class ScheduleEntryBase(BaseModel):
     status: str = "planned"  # <--- ДОБАВЛЕНО
     term_id: Optional[int] = None
     academic_year_id: Optional[int] = None
+    schedule_date: Optional[date] = None
 
 
 class ScheduleEntryCreate(ScheduleEntryBase): pass
@@ -115,6 +116,7 @@ class ScheduleEntryUpdate(BaseModel):
     status: str = "planned"
     term_id: Optional[int] = None
     academic_year_id: Optional[int] = None
+    schedule_date: Optional[date] = None
 
     class Config: from_attributes = True
 
@@ -175,6 +177,29 @@ class AcademicYearCreate(AcademicYearBase): pass
 class AcademicYearOut(AcademicYearBase):
     id: int
 
+    class Config: from_attributes = True
+
+
+class AcademicDayOffCreate(BaseModel):
+    academic_year_id: int
+    day_date: date
+    title: Optional[str] = None
+
+
+class AcademicDayOffOut(AcademicDayOffCreate):
+    id: int
+    class Config: from_attributes = True
+
+
+class TeacherVacationCreate(BaseModel):
+    teacher_id: int
+    academic_year_id: int
+    start_date: date
+    end_date: date
+
+
+class TeacherVacationOut(TeacherVacationCreate):
+    id: int
     class Config: from_attributes = True
 
 

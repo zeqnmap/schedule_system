@@ -74,9 +74,7 @@
                 </div>
                 <div v-else class="input-modern px-5 py-3 text-slate-400 font-bold text-sm">Семестры не заданы</div>
                 <div class="flex items-center gap-3">
-                    <select v-model.number="selectedWeek" class="input-modern px-5 py-3 text-slate-900 font-black text-lg w-40 cursor-pointer">
-                        <option v-for="w in currentTermWeeks" :key="w" :value="w">Неделя {{ w }}</option>
-                    </select>
+                    <label class="relative"><span class="sr-only">Выберите дату недели</span><input v-model="selectedDate" :min="currentTerm?.start_date" :max="currentTerm?.end_date" type="date" class="input-modern px-5 py-3 text-slate-900 font-black text-base w-48 cursor-pointer" title="Выберите любой день: откроется вся неделя"></label>
                 </div>
                 <button @click="changeWeeklyHoursPrompt" class="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-extrabold text-sm transition-all flex items-center gap-2">
                     ⏱️ Акт. пары: <span class="text-emerald-600">{{ currentWeekActualHours }}</span> / {{ currentGroupWeeklyHours }} ч.
@@ -103,7 +101,7 @@
         <div class="grid gap-6" :class="showSaturday ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'">
             <div v-for="day in (showSaturday ? 6 : 5)" :key="day" class="flex flex-col gap-4">
                 <div class="flex items-center justify-between gap-2 mb-1">
-                    <h2 class="font-black text-slate-400 uppercase tracking-widest text-[11px]" :class="day === 6 ? 'text-indigo-400' : ''">{{ getDayName(day) }}</h2>
+                    <div><h2 class="font-black text-slate-400 uppercase tracking-widest text-[11px]" :class="day === 6 ? 'text-indigo-400' : ''">{{ getDayName(day) }}</h2><p class="text-[10px] font-bold" :class="isBeforeTermStart(day) ? 'text-rose-400' : 'text-slate-400'">{{ formatDayDate(day) }}<span v-if="isBeforeTermStart(day)"> · до начала семестра</span></p></div>
                     <div class="flex items-center gap-1"><button @click="exportPdf(day)" title="PDF для групп" class="bg-white border border-slate-200 hover:border-emerald-400 hover:text-emerald-700 text-slate-600 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all">PDF S.</button><button @click="exportTeachersPdf(day)" title="PDF для преподавателей" class="bg-slate-900 text-white hover:bg-emerald-600 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all">PDF T.</button></div>
                 </div>
 

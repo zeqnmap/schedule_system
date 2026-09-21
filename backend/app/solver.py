@@ -55,6 +55,12 @@ def get_teacher_vacation_weeks(teacher) -> set[int]:
     return result
 
 
+def calendar_date_for_slot(year, week: int, day: int) -> date:
+    """Return the real calendar date for a Monday-first timetable column."""
+    monday = year.start_date - timedelta(days=year.start_date.isoweekday() - 1)
+    return monday + timedelta(days=(week - 1) * 7 + day)
+
+
 class SubjectDemand:
     def __init__(self, plan, weekly_limit: int, mode: str, remaining: int):
         self.plan = plan
@@ -198,6 +204,18 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
     model = cp_model.CpModel()
     lesson, pair, single = {}, {}, {}
     objective = []
+    year_by_group = {group.id: db.query(models.AcademicYear).filter_by(id=terms_by_group[group.id].academic_year_id).first() for group in groups}
+    days_off = {(item.academic_year_id, item.day_date) for item in db.query(models.AcademicDayOff).all()}
+    vacations = db.query(models.TeacherVacation).all()
+
+    def date_available(group, day_index):
+        term, year = terms_by_group[group.id], year_by_group[group.id]
+        target = calendar_date_for_slot(year, week, day_index)
+        return term.start_date <= target <= term.end_date and (year.id, target) not in days_off
+
+    def teacher_available(teacher_id, group, day_index):
+        target = calendar_date_for_slot(year_by_group[group.id], week, day_index)
+        return not any(v.teacher_id == teacher_id and v.academic_year_id == year_by_group[group.id].id and v.start_date <= target <= v.end_date for v in vacations)
 
     for group in groups:
         days = 6 if group.has_saturday else 5
@@ -243,6 +261,8 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                         pair_var = pair[group.id, day, slot - 1, demand.id]
                         model.Add(lesson[group.id, day, slot, demand.id] == pair_var + single[group.id, day, slot, demand.id])
                     if (group.id, day, slot) in blocked:
+                        model.Add(lesson[group.id, day, slot, demand.id] == 0)
+                    if not date_available(group, day):
                         model.Add(lesson[group.id, day, slot, demand.id] == 0)
                     objective.append((1000 - slot * 30) * lesson[group.id, day, slot, demand.id])
 
@@ -299,6 +319,9 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                     if teacher.on_vacation or teacher.is_sick or week in get_teacher_vacation_weeks(teacher):
                         for variable in variables:
                             model.Add(variable == 0)
+                    for group, demand in teacher_demands[teacher.id]:
+                        if day < (6 if group.has_saturday else 5) and not teacher_available(teacher.id, group, day):
+                            model.Add(lesson[group.id, day, slot, demand.id] == 0)
                     if day + 1 not in get_teacher_working_days(teacher):
                         for variable in variables:
                             model.Add(variable == 0)
@@ -387,6 +410,7 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
         return False, f"Неделя {week}: невозможно составить безопасное расписание без накладок."
 
     for group in active_groups:
+        year = db.query(models.AcademicYear).filter_by(id=terms_by_group[group.id].academic_year_id).first()
         for day in range(6 if group.has_saturday else 5):
             for slot in range(SLOTS_PER_DAY):
                 for demand in group_demands[group.id]:
@@ -402,6 +426,8 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
                             subject_name=demand.plan.subject_name,
                             status="planned",
                             term_id=terms_by_group[group.id].id,
+                            academic_year_id=terms_by_group[group.id].academic_year_id,
+                            schedule_date=calendar_date_for_slot(year, week, day),
                         ))
     db.commit()
     return True, f"Неделя {week}: создано безопасное расписание."

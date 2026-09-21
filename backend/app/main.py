@@ -4,7 +4,7 @@ import os
 import secrets
 import time
 import io
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
@@ -84,11 +84,26 @@ with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN academic_year_id INTEGER"))
     if "academic_year_id" not in archive_columns:
         connection.execute(text("ALTER TABLE archived_weeks ADD COLUMN academic_year_id INTEGER"))
+    if "schedule_date" not in schedule_columns:
+        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN schedule_date DATE"))
     connection.execute(text("UPDATE group_terms SET start_date = COALESCE(start_date, '2026-09-01'), end_date = COALESCE(end_date, date('2026-09-01', '+' || (start_week + weeks - 2) || ' days'))"))
     connection.execute(text("UPDATE course_plans SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = course_plans.group_id AND group_terms.term_number = 1 LIMIT 1) WHERE term_id IS NULL"))
     connection.execute(text("UPDATE course_plans SET academic_year_id = (SELECT academic_year_id FROM group_terms WHERE group_terms.id = course_plans.term_id) WHERE academic_year_id IS NULL"))
     connection.execute(text("UPDATE schedule_entries SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = schedule_entries.group_id AND schedule_entries.week_number >= group_terms.start_week AND schedule_entries.week_number < group_terms.start_week + group_terms.weeks ORDER BY group_terms.term_number LIMIT 1) WHERE term_id IS NULL"))
     connection.execute(text("UPDATE schedule_entries SET academic_year_id = (SELECT academic_year_id FROM group_terms WHERE group_terms.id = schedule_entries.term_id) WHERE academic_year_id IS NULL"))
+
+# Convert legacy week-based rows once so calendar exclusions also remove
+# previously generated lessons, not only new ones.
+with database.SessionLocal() as migration_db:
+    legacy_entries = migration_db.query(models.ScheduleEntry).filter(models.ScheduleEntry.schedule_date.is_(None)).all()
+    years_by_id = {year.id: year for year in migration_db.query(models.AcademicYear).all()}
+    for entry in legacy_entries:
+        year = years_by_id.get(entry.academic_year_id)
+        if not year:
+            continue
+        monday = year.start_date - timedelta(days=year.start_date.isoweekday() - 1)
+        entry.schedule_date = monday + timedelta(days=(entry.week_number - 1) * 7 + entry.day_of_week - 1)
+    migration_db.commit()
 
 app = FastAPI(title="Schedule System API")
 
@@ -345,6 +360,49 @@ def update_teacher_vacation_weeks(teacher_id: int, data: schemas.TeacherVacation
     return teacher
 
 
+def remove_entries_for_dates(db: Session, academic_year_id: int, start_date: date, end_date: date, teacher_id: Optional[int] = None) -> int:
+    query = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.academic_year_id == academic_year_id,
+        models.ScheduleEntry.schedule_date >= start_date,
+        models.ScheduleEntry.schedule_date <= end_date,
+    )
+    if teacher_id is not None:
+        query = query.filter(or_(models.ScheduleEntry.teacher_id == teacher_id, models.ScheduleEntry.teacher2_id == teacher_id))
+    return query.delete(synchronize_session=False)
+
+
+@app.get("/teacher-vacations/", response_model=List[schemas.TeacherVacationOut])
+def read_teacher_vacations(teacher_id: Optional[int] = None, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+    query = db.query(models.TeacherVacation)
+    if teacher_id:
+        query = query.filter(models.TeacherVacation.teacher_id == teacher_id)
+    if academic_year_id:
+        query = query.filter(models.TeacherVacation.academic_year_id == academic_year_id)
+    return query.order_by(models.TeacherVacation.start_date).all()
+
+
+@app.post("/teacher-vacations/", response_model=schemas.TeacherVacationOut)
+def create_teacher_vacation(data: schemas.TeacherVacationCreate, response: Response, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    if data.end_date < data.start_date:
+        raise HTTPException(status_code=400, detail="Дата окончания отпуска раньше даты начала")
+    if not db.query(models.Teacher).filter_by(id=data.teacher_id).first() or not db.query(models.AcademicYear).filter_by(id=data.academic_year_id).first():
+        raise HTTPException(status_code=404, detail="Преподаватель или учебный год не найден")
+    vacation = models.TeacherVacation(**data.dict())
+    db.add(vacation)
+    removed = remove_entries_for_dates(db, data.academic_year_id, data.start_date, data.end_date, data.teacher_id)
+    db.commit(); db.refresh(vacation); response.headers["X-Removed-Schedule-Entries"] = str(removed)
+    return vacation
+
+
+@app.delete("/teacher-vacations/{vacation_id}")
+def delete_teacher_vacation(vacation_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    vacation = db.query(models.TeacherVacation).filter_by(id=vacation_id).first()
+    if not vacation:
+        raise HTTPException(status_code=404, detail="Период отпуска не найден")
+    db.delete(vacation); db.commit()
+    return {"ok": True}
+
+
 @app.delete("/teachers/{teacher_id}")
 def delete_teacher(teacher_id: int, db: Session = Depends(database.get_db)):
     db.query(models.Teacher).filter(models.Teacher.id == teacher_id).delete()
@@ -434,6 +492,35 @@ def activate_academic_year(year_id: int, _: models.User = Depends(require_admin)
     if not year: raise HTTPException(status_code=404, detail="Учебный год не найден")
     db.query(models.AcademicYear).update({models.AcademicYear.is_active: False}, synchronize_session=False)
     year.is_active = True; db.commit(); db.refresh(year); return year
+
+
+@app.get("/academic-days-off/", response_model=List[schemas.AcademicDayOffOut])
+def read_academic_days_off(academic_year_id: int, db: Session = Depends(database.get_db)):
+    return db.query(models.AcademicDayOff).filter_by(academic_year_id=academic_year_id).order_by(models.AcademicDayOff.day_date).all()
+
+
+@app.post("/academic-days-off/", response_model=schemas.AcademicDayOffOut)
+def create_academic_day_off(data: schemas.AcademicDayOffCreate, response: Response, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    year = db.query(models.AcademicYear).filter_by(id=data.academic_year_id).first()
+    if not year or data.day_date < year.start_date or data.day_date > year.end_date:
+        raise HTTPException(status_code=400, detail="Дата должна находиться внутри выбранного учебного года")
+    existing = db.query(models.AcademicDayOff).filter_by(academic_year_id=data.academic_year_id, day_date=data.day_date).first()
+    if existing:
+        return existing
+    day_off = models.AcademicDayOff(**data.dict())
+    db.add(day_off)
+    removed = remove_entries_for_dates(db, data.academic_year_id, data.day_date, data.day_date)
+    db.commit(); db.refresh(day_off); response.headers["X-Removed-Schedule-Entries"] = str(removed)
+    return day_off
+
+
+@app.delete("/academic-days-off/{day_off_id}")
+def delete_academic_day_off(day_off_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    day_off = db.query(models.AcademicDayOff).filter_by(id=day_off_id).first()
+    if not day_off:
+        raise HTTPException(status_code=404, detail="Выходной не найден")
+    db.delete(day_off); db.commit()
+    return {"ok": True}
 
 
 @app.post("/groups/", response_model=schemas.GroupOut)
@@ -582,9 +669,8 @@ def create_group_term(data: schemas.GroupTermCreate, _: models.User = Depends(re
     if overlap:
         raise HTTPException(status_code=409, detail=f"Даты пересекаются с периодом «{overlap.name}» этой группы")
     start_week = max(1, ((data.start_date - year.start_date).days // 7) + 1)
-    weeks = max(1, int(data.weeks or ((data.end_date - data.start_date).days // 7) + 1))
-    end_date = data.start_date + __import__('datetime').timedelta(days=weeks * 7 - 1)
-    term = models.GroupTerm(academic_year_id=year.id, group_id=data.group_id, term_number=data.term_number, name=data.name, start_week=start_week, weeks=weeks, start_date=data.start_date, end_date=end_date, is_active=True, is_locked=False)
+    weeks = max(1, ((data.end_date - data.start_date).days + 7) // 7)
+    term = models.GroupTerm(academic_year_id=year.id, group_id=data.group_id, term_number=data.term_number, name=data.name, start_week=start_week, weeks=weeks, start_date=data.start_date, end_date=data.end_date, is_active=True, is_locked=False)
     db.add(term); db.commit(); db.refresh(term)
     return term
 
@@ -599,8 +685,10 @@ def update_group_term(term_id: int, data: schemas.GroupTermCreate, _: models.Use
     if data.group_id != term.group_id:
         raise HTTPException(status_code=400, detail="Проверьте группу и дату начала семестра")
     from datetime import timedelta
-    weeks = max(1, int(data.weeks or term.weeks or 1))
-    calculated_end = data.start_date + timedelta(days=weeks * 7 - 1)
+    if data.end_date < data.start_date:
+        raise HTTPException(status_code=400, detail="Дата окончания раньше даты начала")
+    calculated_end = data.end_date
+    weeks = max(1, ((calculated_end - data.start_date).days + 7) // 7)
     overlaps = db.query(models.GroupTerm).filter(
         models.GroupTerm.id != term.id,
         models.GroupTerm.group_id == term.group_id,
@@ -616,8 +704,6 @@ def update_group_term(term_id: int, data: schemas.GroupTermCreate, _: models.Use
     term.end_date = calculated_end
     term.start_week = max(1, ((data.start_date - year.start_date).days // 7) + 1)
     term.weeks = weeks
-    # A date shift must not silently change the configured semester length.
-    # The legacy weeks field remains the source of truth for duration.
     db.commit(); db.refresh(term)
     return term
 
@@ -1215,7 +1301,37 @@ def teacher_is_on_vacation(teacher, week_number: int) -> bool:
     return week_number in vacation_weeks
 
 
+def entry_calendar_date(data: schemas.ScheduleEntryBase, db: Session) -> Optional[date]:
+    if data.schedule_date:
+        return data.schedule_date
+    year = db.query(models.AcademicYear).filter_by(id=data.academic_year_id).first() if data.academic_year_id else None
+    if not year:
+        return None
+    monday = year.start_date - timedelta(days=year.start_date.isoweekday() - 1)
+    return monday + timedelta(days=(data.week_number - 1) * 7 + data.day_of_week - 1)
+
+
+def is_teacher_on_date_vacation(teacher_id: int, academic_year_id: Optional[int], target_date: Optional[date], db: Session) -> bool:
+    if not target_date or not academic_year_id:
+        return False
+    return db.query(models.TeacherVacation).filter(
+        models.TeacherVacation.teacher_id == teacher_id,
+        models.TeacherVacation.academic_year_id == academic_year_id,
+        models.TeacherVacation.start_date <= target_date,
+        models.TeacherVacation.end_date >= target_date,
+    ).first() is not None
+
+
 def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, exclude_entry_id: Optional[int] = None):
+    target_date = entry_calendar_date(data, db)
+    if data.term_id and target_date:
+        term = db.query(models.GroupTerm).filter_by(id=data.term_id, group_id=data.group_id).first()
+        if term and (target_date < term.start_date or target_date > term.end_date):
+            raise HTTPException(status_code=409, detail="Дата занятия находится за пределами выбранного семестра")
+    if target_date and target_date.isoweekday() == 7:
+        raise HTTPException(status_code=409, detail="В воскресенье занятия не проводятся")
+    if target_date and data.academic_year_id and db.query(models.AcademicDayOff).filter_by(academic_year_id=data.academic_year_id, day_date=target_date).first():
+        raise HTTPException(status_code=409, detail="Эта дата объявлена общим выходным")
     teacher_ids = {teacher_id for teacher_id in (data.teacher_id, data.teacher2_id) if teacher_id}
     selected_teachers = db.query(models.Teacher).filter(models.Teacher.id.in_(teacher_ids)).all()
     if len(selected_teachers) != len(teacher_ids):
@@ -1225,6 +1341,8 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
             raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} не работает в выбранный день")
         if teacher_is_on_vacation(teacher, data.week_number):
             raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} находится в отпуске на этой неделе")
+        if is_teacher_on_date_vacation(teacher.id, data.academic_year_id, target_date, db):
+            raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} находится в отпуске в эту дату")
     blocked = db.query(models.CuratorHour).filter(
         models.CuratorHour.group_id.in_([0, data.group_id]),
         models.CuratorHour.day_of_week == data.day_of_week,
@@ -1276,6 +1394,7 @@ def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session =
     if entry_data.term_id:
         term = db.query(models.GroupTerm).filter_by(id=entry_data.term_id, group_id=entry_data.group_id).first()
         if term: entry_data.academic_year_id = term.academic_year_id
+    entry_data.schedule_date = entry_calendar_date(entry_data, db)
     validate_schedule_conflicts(entry_data, db)
     new_entry = models.ScheduleEntry(**entry_data.dict())
     db.add(new_entry)
@@ -1293,6 +1412,7 @@ def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdat
     if update_data.term_id:
         term = db.query(models.GroupTerm).filter_by(id=update_data.term_id, group_id=update_data.group_id).first()
         if term: update_data.academic_year_id = term.academic_year_id
+    update_data.schedule_date = entry_calendar_date(update_data, db)
     validate_schedule_conflicts(update_data, db, exclude_entry_id=entry_id)
     for key, value in update_data.dict().items(): setattr(entry, key, value)
     db.commit()

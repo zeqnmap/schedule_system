@@ -2,7 +2,7 @@ const { createApp, ref, computed, onMounted, watch } = Vue;
 createApp({ setup() {
     const groups = ref([]), teachers = ref([]), plans = ref([]), schedule = ref([]), allSchedule = ref([]), curatorHours = ref([]), terms = ref([]), academicYears = ref([]);
     const selectedAcademicYearId = ref(Number(localStorage.getItem('edusync-academic-year-id')) || null);
-    const selectedGroupId = ref(null), selectedTermId = ref(null), selectedWeek = ref(1), isArchived = ref(false), isArchivedAll = ref(false), isGenerating = ref(false);
+    const selectedGroupId = ref(null), selectedTermId = ref(null), selectedWeek = ref(1), selectedDate = ref(''), isArchived = ref(false), isArchivedAll = ref(false), isGenerating = ref(false);
     const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), errorMessage = ref('');
     const currentGroup = computed(() => groups.value.find(gr => Number(gr.id) === Number(selectedGroupId.value)));
     const currentGroupNumber = computed(() => currentGroup.value?.number || '');
@@ -14,6 +14,39 @@ createApp({ setup() {
         .sort((a, b) => Number(a.term_number || 0) - Number(b.term_number || 0)));
     const currentTerm = computed(() => currentGroupTerms.value.find(term => Number(term.id) === Number(selectedTermId.value)));
     const currentTermWeeks = computed(() => { const term = currentTerm.value; return term ? Array.from({ length: term.weeks }, (_, index) => term.start_week + index) : Array.from({ length: currentGroupSemesterWeeks.value }, (_, index) => index + 1); });
+    const currentAcademicYear = computed(() => academicYears.value.find(year => Number(year.id) === Number(selectedAcademicYearId.value)));
+    const localDate = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+    const weekForDate = value => {
+        const year = currentAcademicYear.value;
+        if (!year || !value) return 1;
+        const start = new Date(`${year.start_date}T00:00:00`);
+        const monday = new Date(start);
+        monday.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+        return Math.max(1, Math.floor((new Date(`${value}T00:00:00`) - monday) / 604800000) + 1);
+    };
+    const dateForWeek = week => {
+        const year = currentAcademicYear.value;
+        if (!year) return '';
+        const start = new Date(`${year.start_date}T00:00:00`), monday = new Date(start);
+        monday.setDate(start.getDate() - ((start.getDay() + 6) % 7) + (Number(week) - 1) * 7);
+        return localDate(monday);
+    };
+    const calendarDateForDay = day => {
+        const year = currentAcademicYear.value;
+        if (!year) return null;
+        const start = new Date(`${year.start_date}T00:00:00`);
+        const monday = new Date(start);
+        monday.setDate(start.getDate() - ((start.getDay() + 6) % 7) + (Number(selectedWeek.value) - 1) * 7 + day - 1);
+        return monday;
+    };
+    const formatDayDate = day => {
+        const value = calendarDateForDay(day);
+        return value ? value.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
+    };
+    const isBeforeTermStart = day => {
+        const value = calendarDateForDay(day), term = currentTerm.value;
+        return Boolean(value && term && value < new Date(`${term.start_date}T00:00:00`));
+    };
     const currentWeekActualHours = computed(() => schedule.value.filter(e => e.status !== 'canceled').length);
     const showSaturday = computed(() => currentGroupHasSaturday.value || schedule.value.some(e => e.day_of_week === 6));
     const groupPlans = computed(() => plans.value.filter(p => Number(p.group_id) === Number(selectedGroupId.value) && (!selectedTermId.value || Number(p.term_id) === Number(selectedTermId.value))));
@@ -30,11 +63,13 @@ createApp({ setup() {
         if (!term) return;
         selectedTermId.value = term.id;
         selectedWeek.value = Number(term.start_week || 1);
+        selectedDate.value = term.start_date;
         modalMode.value = null;
         errorMessage.value = '';
     };
     watch(selectedGroupId, () => { selectedTermId.value = currentGroupTerms.value[0]?.id || null; });
-    watch(selectedTermId, () => { if (currentTermWeeks.value.length) selectedWeek.value = currentTermWeeks.value[0]; fetchSchedule(); fetchArchiveStatus(); });
+    watch(selectedTermId, () => { if (currentTermWeeks.value.length) { selectedWeek.value = currentTermWeeks.value[0]; selectedDate.value = currentTerm.value?.start_date || dateForWeek(selectedWeek.value); } fetchSchedule(); fetchArchiveStatus(); });
+    watch(selectedDate, value => { if (!value) return; const week = weekForDate(value); if (currentTermWeeks.value.includes(week)) selectedWeek.value = week; });
     watch(selectedWeek, () => { fetchSchedule(); fetchArchiveStatus(); });
     onMounted(async () => { await fetchData(); await fetchSchedule(); await fetchArchiveStatus(); });
     const getDayName = dayNum => ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'][dayNum - 1];
@@ -92,5 +127,5 @@ createApp({ setup() {
         if (!selectedDate) { alert('Введите дату в формате ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.'); return; }
         window.open(`/export/teachers.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(selectedDate)}`, '_blank');
     };
-    return { groups, teachers, plans, schedule, allSchedule, curatorHours, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, isArchived, isArchivedAll, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, selectTerm, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, curatorRoomName, onPlanChange, updateRoomFromTeacher, openEditModal, openCreateModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf, exportTeachersPdf };
+    return { groups, teachers, plans, schedule, allSchedule, curatorHours, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, modalMode, form, selectedPlanId, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, curatorTeacherName, curatorRoomName, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf, exportTeachersPdf, formatDayDate, isBeforeTermStart };
 } }).component('searchable-select', SearchableSelect).mount('#app');
