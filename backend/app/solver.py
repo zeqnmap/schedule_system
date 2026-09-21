@@ -202,7 +202,7 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                         curator_room_slots.add((room_name.strip(), item.day_of_week - 1, item.time_slot - 1 + offset))
 
     model = cp_model.CpModel()
-    lesson, pair, single = {}, {}, {}
+    lesson, pair, single, pair_starts = {}, {}, {}, {}
     objective = []
     year_by_group = {group.id: db.query(models.AcademicYear).filter_by(id=terms_by_group[group.id].academic_year_id).first() for group in groups}
     days_off = {(item.academic_year_id, item.day_date) for item in db.query(models.AcademicDayOff).all()}
@@ -229,11 +229,21 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                     single[group.id, day, slot, demand.id] = model.NewBoolVar(
                         f"single_g{group.id}_d{day}_s{slot}_p{demand.id}"
                     )
-                for start in range(0, SLOTS_PER_DAY - 1, 2):
+                # A regular pair starts on the usual even slot. If a curator
+                # hour splits a day, the first free slot after it is also a
+                # valid pair start, otherwise two lessons after that hour can
+                # never be scheduled for pair-only subjects.
+                starts = list(range(0, SLOTS_PER_DAY - 1, 2))
+                starts.extend(
+                    slot for slot in range(1, SLOTS_PER_DAY - 1)
+                    if (group.id, day, slot - 1) in blocked and slot not in starts
+                )
+                pair_starts[group.id, day] = starts
+                for start in starts:
                     pair[group.id, day, start, demand.id] = model.NewBoolVar(
                         f"pair_g{group.id}_d{day}_s{start}_p{demand.id}"
                     )
-            pairs = [pair[group.id, day, start, demand.id] for day in range(days) for start in range(0, SLOTS_PER_DAY - 1, 2)]
+            pairs = [pair[group.id, day, start, demand.id] for day in range(days) for start in pair_starts[group.id, day]]
             singles = [single[group.id, day, slot, demand.id] for day in range(days) for slot in range(SLOTS_PER_DAY)]
             model.Add(sum(pairs) <= max_pairs)
             model.Add(sum(singles) <= max_singles)
@@ -252,14 +262,12 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
 
             for day in range(days):
                 for slot in range(SLOTS_PER_DAY):
-                    if slot % 2 == 0:
-                        pair_var = pair[group.id, day, slot, demand.id]
-                        model.Add(lesson[group.id, day, slot, demand.id] == pair_var + single[group.id, day, slot, demand.id])
-                        model.Add(lesson[group.id, day, slot + 1, demand.id] == pair_var + single[group.id, day, slot + 1, demand.id])
-                    else:
-                        # Odd slots may only be the second half of the preceding pair.
-                        pair_var = pair[group.id, day, slot - 1, demand.id]
-                        model.Add(lesson[group.id, day, slot, demand.id] == pair_var + single[group.id, day, slot, demand.id])
+                    covering_pairs = [
+                        pair[group.id, day, start, demand.id]
+                        for start in pair_starts[group.id, day]
+                        if start == slot or start + 1 == slot
+                    ]
+                    model.Add(lesson[group.id, day, slot, demand.id] == sum(covering_pairs) + single[group.id, day, slot, demand.id])
                     if (group.id, day, slot) in blocked:
                         model.Add(lesson[group.id, day, slot, demand.id] == 0)
                     if not date_available(group, day):
