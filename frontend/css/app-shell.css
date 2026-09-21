@@ -71,8 +71,8 @@ body::before {
 .academic-years-page .bento-card { border-radius: 24px; border: 1px solid var(--line); }
 .academic-years-page .input-modern { border: 1px solid var(--line); border-radius: 14px; }
 .academic-years-page .bento-card > .grid > .input-modern { min-height: 50px; }
-.academic-years-page main#app > section.space-y-3 { display: grid; gap: 14px; box-shadow: none !important; }
-.academic-years-page main#app > section.space-y-3 > article { margin-top: 0 !important; box-shadow: none; }
+.academic-years-page main#app > section.space-y-3 { display: flex; flex-direction: column; gap: 16px !important; background: transparent !important; border: 0 !important; border-radius: 0 !important; padding: 0 !important; box-shadow: none !important; }
+.academic-years-page main#app > section.space-y-3 > article { margin-top: 0 !important; border-radius: 16px !important; box-shadow: none; }
 .btn-emerald { background: linear-gradient(135deg, #10b981, #047857) !important; }
 input, select, textarea { accent-color: var(--accent); }
 input:focus, select:focus, textarea:focus { outline-color: #34d399 !important; }
