@@ -1,0 +1,38 @@
+body { font-family: 'Inter', sans-serif; }
+[v-cloak] { display: none; }
+.bento-card { border: 1px solid #e2e8f0; border-radius: 24px; background: rgba(255,255,255,.86); }
+.field-label { display: block; margin-bottom: 9px; color: #64748b; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.input-modern { border: 1px solid #e2e8f0; border-radius: 16px; background: #f8fafc; outline: none; transition: .2s ease; }
+.input-modern:focus { border-color: #10b981; box-shadow: 0 0 0 4px rgba(16,185,129,.13); }
+.btn-emerald { color: white; background: linear-gradient(135deg, #10b981, #047857); box-shadow: 0 10px 26px -10px rgba(5,150,105,.55); transition: .2s ease; }
+.btn-emerald:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 14px 30px -10px rgba(5,150,105,.66); }
+.range-chip { padding: 8px 11px; border-radius: 10px; background: #f1f5f9; color: #475569; font-size: 12px; }
+.statement-note { display: flex; gap: 13px; padding: 18px; border: 1px solid #e2e8f0; border-radius: 18px; background: rgba(255,255,255,.72); }
+main#app > section.statement-notes,
+body.dark-theme main#app > section.statement-notes { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+.statement-note > span { display: grid; flex: 0 0 auto; width: 28px; height: 28px; place-items: center; border-radius: 9px; background: #ecfdf5; color: #047857; font-size: 12px; font-weight: 900; }
+.statement-note strong { display: block; color: #1e293b; font-size: 13px; font-weight: 900; }
+.statement-note p { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.45; }
+.statement-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(15,23,42,.6); backdrop-filter: blur(10px); }
+.statement-dialog { width: min(100%, 580px); max-height: calc(100vh - 40px); overflow: auto; padding: 26px; border: 1px solid #e2e8f0; border-radius: 24px; background: #fff; box-shadow: 0 28px 70px rgba(15,23,42,.28); }
+.calendar-close { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 11px; background: #f1f5f9; color: #475569; font-size: 23px; font-weight: 500; }
+.date-summary { padding: 12px; border: 1px solid #e2e8f0; border-radius: 13px; background: #f8fafc; }
+.date-summary span { display: block; color: #94a3b8; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
+.date-summary strong { display: block; margin-top: 3px; color: #1e293b; font-size: 14px; font-weight: 900; }
+.teacher-vacation-calendar { padding: 14px; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; }
+.calendar-nav { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; background: #f1f5f9; color: #475569; font-size: 19px; font-weight: 900; transition: .15s ease; }
+.calendar-nav:disabled { opacity: .35; cursor: default; }
+.statement-calendar-day { height: 39px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 9px; color: #475569; font-size: 12px; font-weight: 800; transition: .15s ease; }
+.statement-calendar-day:not(:disabled):hover { border-color: #34d399; color: #047857; }
+.statement-calendar-day--selected { background: #10b981; color: white !important; }
+.statement-calendar-day--between { background: #d1fae5; color: #047857; }
+.statement-calendar-day--disabled { opacity: .25; cursor: default; }
+.secondary-button { padding: 12px 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; color: #475569; font-size: 14px; font-weight: 900; }
+.fade-enter-active, .fade-leave-active { transition: opacity .18s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+body.dark-theme .bento-card, body.dark-theme .statement-note, body.dark-theme .statement-dialog, body.dark-theme .teacher-vacation-calendar { background: #242424; border-color: #454545; }
+body.dark-theme .range-chip, body.dark-theme .date-summary, body.dark-theme .calendar-close, body.dark-theme .calendar-nav, body.dark-theme .secondary-button { background: #303030; border-color: #454545; color: #d4d4d4; }
+body.dark-theme .statement-note strong, body.dark-theme .date-summary strong { color: #f1f1f1; }
+body.dark-theme .statement-note p { color: #a8a8a8; }
+body.dark-theme .statement-calendar-day { color: #d4d4d4; }
+body.dark-theme .statement-calendar-day--between { background: #173d32; color: #6ee7b7; }

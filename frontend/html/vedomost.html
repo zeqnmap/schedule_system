@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ведомость | EduSync 2026</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="../css/app-shell.css">
+    <link rel="stylesheet" href="../css/vedomost.css">
+    <script src="../js/auth.js" defer></script>
+    <script src="../js/app-nav.js" defer></script>
+    <script src="../js/vedomost.js" defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body class="text-slate-800 antialiased min-h-screen">
+    <nav></nav>
+    <main id="app" v-cloak class="max-w-[1180px] mx-auto px-6 lg:px-10 pt-32 pb-16">
+        <header class="mb-10">
+            <p class="text-xs font-black uppercase tracking-[.18em] text-emerald-600">Учёт проведённых занятий</p>
+            <h1 class="mt-2 text-4xl lg:text-5xl font-black text-slate-900 tracking-tight">Ведомость часов</h1>
+            <p class="mt-3 text-lg text-slate-500 font-medium">Экспорт проведённых занятий группы за выбранный календарный период.</p>
+        </header>
+
+        <section class="bento-card p-7 lg:p-9">
+            <div class="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
+                <div>
+                    <label class="field-label" for="statement-group">Учебная группа</label>
+                    <select id="statement-group" v-model.number="selectedGroupId" class="input-modern w-full px-5 py-4 text-lg font-black text-slate-900">
+                        <option :value="null" disabled>Выберите группу</option>
+                        <option v-for="group in groups" :key="group.id" :value="group.id">Группа {{ group.number }}</option>
+                    </select>
+                </div>
+                <button type="button" @click="openCalendar" :disabled="!selectedGroupId" class="btn-emerald statement-download rounded-2xl px-7 py-4 font-black disabled:opacity-45 disabled:cursor-not-allowed">
+                    Скачать ведомость PDF
+                </button>
+            </div>
+            <div v-if="currentRange" class="mt-6 flex flex-wrap gap-3 text-sm font-bold text-slate-500">
+                <span class="range-chip">Доступные даты: {{ formatDate(currentRange.start) }} — {{ formatDate(currentRange.end) }}</span>
+                <span class="range-chip">Семестров: {{ groupTerms.length }}</span>
+            </div>
+        </section>
+
+        <section class="statement-notes mt-7 grid gap-5 md:grid-cols-3">
+            <article class="statement-note"><span>1</span><div><strong>Выберите период</strong><p>Календарь ограничен датами семестров выбранной группы.</p></div></article>
+            <article class="statement-note"><span>2</span><div><strong>Только проведённые часы</strong><p>Отменённые занятия в ведомость не попадают.</p></div></article>
+            <article class="statement-note"><span>3</span><div><strong>Детализация по дням</strong><p>PDF показывает предметы, преподавателей, даты, итог и план.</p></div></article>
+        </section>
+
+        <div v-if="errorMessage" class="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 font-bold text-rose-700">{{ errorMessage }}</div>
+
+        <Transition name="fade">
+            <div v-if="calendarOpen" class="statement-modal" @click.self="closeCalendar">
+                <section class="statement-dialog">
+                    <div class="flex items-start justify-between gap-5 border-b border-slate-100 pb-5">
+                        <div><h2 class="text-2xl font-black text-slate-900">Период ведомости</h2><p class="mt-1 text-sm font-medium text-slate-500">Выберите дату начала и дату окончания.</p></div>
+                        <button type="button" @click="closeCalendar" class="calendar-close" aria-label="Закрыть">×</button>
+                    </div>
+                    <div class="mt-5 grid grid-cols-2 gap-3">
+                        <div class="date-summary"><span>С</span><strong>{{ formatDate(startDate) }}</strong></div>
+                        <div class="date-summary"><span>По</span><strong>{{ formatDate(endDate) }}</strong></div>
+                    </div>
+                    <div class="mt-6 teacher-vacation-calendar">
+                        <div class="flex items-center justify-between gap-3 mb-4">
+                            <button type="button" @click="previousMonth" :disabled="!canPreviousMonth" class="calendar-nav">‹</button>
+                            <strong class="text-sm capitalize">{{ monthTitle }}</strong>
+                            <button type="button" @click="nextMonth" :disabled="!canNextMonth" class="calendar-nav">›</button>
+                        </div>
+                        <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-black text-slate-400 mb-2"><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div>
+                        <div class="grid grid-cols-7 gap-1"><button v-for="(day, index) in calendarDays" :key="day?.value || index" type="button" @click="selectDate(day)" :disabled="!day || day.disabled" :class="['statement-calendar-day', { 'statement-calendar-day--selected': day?.selected, 'statement-calendar-day--between': day?.between, 'statement-calendar-day--disabled': day?.disabled }]">{{ day?.number }}</button></div>
+                    </div>
+                    <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                        <button type="button" @click="closeCalendar" class="secondary-button">Отмена</button>
+                        <button type="button" @click="downloadStatement" :disabled="!startDate || !endDate" class="btn-emerald rounded-xl px-5 py-3 text-sm font-black disabled:opacity-45">Скачать PDF</button>
+                    </div>
+                </section>
+            </div>
+        </Transition>
+    </main>
+</body>
+</html>

@@ -7,6 +7,7 @@ import io
 from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Optional
+from xml.sax.saxutils import escape
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -179,7 +180,7 @@ async def protect_site(request: Request, call_next):
             user = current_user(request, db)
             admin_pages = {
                 "/teachers.html", "/groups_subjects.html", "/admin.html", "/progress.html", "/users.html", "/algorithm_settings.html",
-                "/html/teachers.html", "/html/groups_subjects.html", "/html/admin.html", "/html/progress.html", "/html/users.html", "/html/algorithm_settings.html",
+                "/vedomost.html", "/html/teachers.html", "/html/groups_subjects.html", "/html/admin.html", "/html/progress.html", "/html/vedomost.html", "/html/users.html", "/html/algorithm_settings.html",
             }
             if request.url.path in admin_pages and not user.is_admin:
                 return Response(status_code=307, headers={"Location": "/"})
@@ -1284,6 +1285,130 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
     document.build(story)
     buffer.seek(0)
     return buffer
+
+
+def build_hours_statement_pdf(db: Session, group_id: int, start_date: date, end_date: date):
+    group = db.query(models.Group).filter_by(id=group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="Дата окончания раньше даты начала")
+
+    font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
+    if not font_path:
+        raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
+    pdfmetrics.registerFont(TTFont("StatementFont", font_path))
+    bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
+    pdfmetrics.registerFont(TTFont("StatementFont-Bold", bold_font_path))
+
+    term_by_id = {term.id: term for term in db.query(models.GroupTerm).filter_by(group_id=group.id).all()}
+    teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
+    plans = []
+    for plan in db.query(models.CoursePlan).filter_by(group_id=group.id).all():
+        term = term_by_id.get(plan.term_id)
+        if term and (term.end_date < start_date or term.start_date > end_date):
+            continue
+        plans.append(plan)
+
+    entries = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.group_id == group.id,
+        models.ScheduleEntry.status != "canceled",
+        models.ScheduleEntry.schedule_date.isnot(None),
+        models.ScheduleEntry.schedule_date >= start_date,
+        models.ScheduleEntry.schedule_date <= end_date,
+    ).order_by(models.ScheduleEntry.schedule_date, models.ScheduleEntry.time_slot).all()
+
+    def signature(term_id, subject_name, teacher_id, teacher2_id):
+        return (term_id, (subject_name or "").strip(), teacher_id, teacher2_id)
+
+    plans_by_signature = {
+        signature(plan.term_id, plan.subject_name, plan.teacher_id, plan.teacher2_id): plan
+        for plan in plans
+    }
+    rows_by_key = {}
+    for plan in plans:
+        key = ("plan", plan.id)
+        rows_by_key[key] = {
+            "subject": plan.subject_name or "Без названия",
+            "teacher": " / ".join(filter(None, [teachers.get(plan.teacher_id), teachers.get(plan.teacher2_id)])) or "Не назначен",
+            "plan": int(plan.total_hours or 0),
+            "hours": {},
+        }
+    for entry in entries:
+        plan = plans_by_signature.get(signature(entry.term_id, entry.subject_name, entry.teacher_id, entry.teacher2_id))
+        key = ("plan", plan.id) if plan else ("entry", entry.term_id, entry.subject_name, entry.teacher_id, entry.teacher2_id)
+        if key not in rows_by_key:
+            rows_by_key[key] = {
+                "subject": entry.subject_name or "Без названия",
+                "teacher": " / ".join(filter(None, [teachers.get(entry.teacher_id), teachers.get(entry.teacher2_id)])) or "Не назначен",
+                "plan": 0,
+                "hours": {},
+            }
+        rows_by_key[key]["hours"][entry.schedule_date] = rows_by_key[key]["hours"].get(entry.schedule_date, 0) + 1
+
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=8 * mm, rightMargin=8 * mm, topMargin=9 * mm, bottomMargin=9 * mm)
+    title = ParagraphStyle("StatementTitle", fontName="StatementFont-Bold", fontSize=15, leading=18, alignment=1, textColor=colors.HexColor("#0f172a"), spaceAfter=2)
+    subtitle = ParagraphStyle("StatementSubtitle", fontName="StatementFont", fontSize=9, leading=12, alignment=1, textColor=colors.HexColor("#475569"), spaceAfter=4)
+    cell_subject = ParagraphStyle("StatementSubject", fontName="StatementFont-Bold", fontSize=6.3, leading=7.6, textColor=colors.HexColor("#0f172a"))
+    cell_teacher = ParagraphStyle("StatementTeacher", fontName="StatementFont", fontSize=6.1, leading=7.4, textColor=colors.HexColor("#0f172a"))
+    months_ru = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+    story = [
+        Paragraph("ВЕДОМОСТЬ УЧЁТА ПРОВЕДЁННЫХ ЧАСОВ", title),
+        Paragraph(f"Группа {group.number}  •  период: {start_date.strftime('%d.%m.%Y')} — {end_date.strftime('%d.%m.%Y')}", subtitle),
+        Spacer(1, 3 * mm),
+    ]
+
+    month_start = date(start_date.year, start_date.month, 1)
+    while month_start <= end_date:
+        next_month = date(month_start.year + (month_start.month == 12), 1 if month_start.month == 12 else month_start.month + 1, 1)
+        month_end = next_month - timedelta(days=1)
+        visible_start, visible_end = max(start_date, month_start), min(end_date, month_end)
+        days = [visible_start + timedelta(days=offset) for offset in range((visible_end - visible_start).days + 1)]
+        story.append(Paragraph(f"{months_ru[month_start.month - 1]} {month_start.year}", ParagraphStyle("StatementMonth", parent=subtitle, fontName="StatementFont-Bold", fontSize=11, textColor=colors.HexColor("#0f766e"), spaceAfter=2)))
+        header = ["№", "Предмет", "Преподаватель"] + [str(day.day) for day in days] + ["Итого", "План"]
+        table_rows = [header]
+        ordered_rows = sorted(rows_by_key.values(), key=lambda row: (row["subject"].casefold(), row["teacher"].casefold()))
+        for index, row in enumerate(ordered_rows, 1):
+            monthly_total = sum(row["hours"].get(day, 0) for day in days)
+            table_rows.append([
+                str(index),
+                Paragraph(escape(row["subject"]), cell_subject),
+                Paragraph(escape(row["teacher"]), cell_teacher),
+            ] + [str(row["hours"].get(day, "")) for day in days] + [str(monthly_total) if monthly_total else "", str(row["plan"]) if row["plan"] else "—"])
+        if not ordered_rows:
+            table_rows.append(["", "Занятий за выбранный период нет", ""] + [""] * (len(days) + 2))
+        fixed_width = 7 * mm + 46 * mm + 41 * mm + 10 * mm + 10 * mm
+        page_width = landscape(A4)[0] - document.leftMargin - document.rightMargin
+        day_width = max(4.3 * mm, (page_width - fixed_width) / max(1, len(days)))
+        widths = [7 * mm, 46 * mm, 41 * mm] + [day_width] * len(days) + [10 * mm, 10 * mm]
+        table = Table(table_rows, colWidths=widths, repeatRows=1)
+        style = [
+            ("FONTNAME", (0, 0), (-1, 0), "StatementFont-Bold"), ("FONTSIZE", (0, 0), (-1, 0), 6.5),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 1), (-1, -1), "StatementFont"), ("FONTSIZE", (0, 1), (-1, -1), 6.3),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (0, -1), "CENTER"), ("ALIGN", (3, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]
+        for row_index in range(1, len(table_rows)):
+            if row_index % 2 == 0:
+                style.append(("BACKGROUND", (0, row_index), (-1, row_index), colors.HexColor("#f8fafc")))
+        table.setStyle(TableStyle(style))
+        story.append(table)
+        if next_month <= end_date:
+            story.append(PageBreak())
+        month_start = next_month
+    document.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+@app.get("/export/hours-statement.pdf")
+def export_hours_statement_pdf(group_id: int, start_date: date, end_date: date, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    filename = f"vedomost_group_{group_id}_{start_date.isoformat()}_{end_date.isoformat()}.pdf"
+    return StreamingResponse(build_hours_statement_pdf(db, group_id, start_date, end_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.get("/export/schedule.pdf")

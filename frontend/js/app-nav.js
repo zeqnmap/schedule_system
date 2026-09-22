@@ -28,6 +28,7 @@
         ['teachers.html', 'Преподаватели', 'admin'],
         ['admin.html', 'Учебные планы', 'admin'],
         ['progress.html', 'Часы', 'admin'],
+        ['vedomost.html', 'Ведомость', 'admin'],
         ['algorithm_settings.html', 'Алгоритм', 'admin'],
         ['users.html', 'Доступы', 'admin'],
         ['index.html', 'Расписание', 'all'],
