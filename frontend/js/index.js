@@ -4,6 +4,8 @@ createApp({ setup() {
     const selectedAcademicYearId = ref(Number(localStorage.getItem('edusync-academic-year-id')) || null);
     const selectedGroupId = ref(null), selectedTermId = ref(null), selectedWeek = ref(1), selectedDate = ref(''), isArchived = ref(false), isArchivedAll = ref(false), isGenerating = ref(false);
     const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), activeCardId = ref(null), errorMessage = ref('');
+    let scheduleRequestId = 0;
+    let archiveRequestId = 0;
     const currentGroup = computed(() => groups.value.find(gr => Number(gr.id) === Number(selectedGroupId.value)));
     const currentGroupNumber = computed(() => currentGroup.value?.number || '');
     const currentGroupHasSaturday = computed(() => Boolean(currentGroup.value?.has_saturday));
@@ -52,8 +54,39 @@ createApp({ setup() {
     const groupPlans = computed(() => plans.value.filter(p => Number(p.group_id) === Number(selectedGroupId.value) && (!selectedTermId.value || Number(p.term_id) === Number(selectedTermId.value))));
     const fetchData = async () => { const yRes = await fetch('/academic-years/'); if (yRes.ok) { academicYears.value = await yRes.json(); if (!academicYears.value.some(y => Number(y.id) === Number(selectedAcademicYearId.value))) selectedAcademicYearId.value = academicYears.value.find(y => y.is_active)?.id || academicYears.value[0]?.id || null; } const yearParam = selectedAcademicYearId.value ? `?academic_year_id=${selectedAcademicYearId.value}` : ''; const [gRes, tRes, pRes, cRes, termRes] = await Promise.all([fetch('/groups/'), fetch('/teachers/'), fetch('/course_plans/'), fetch('/curator-hours/'), fetch(`/group-terms/${yearParam}`)]); if (gRes.ok) { groups.value = await gRes.json(); if (groups.value.length && !selectedGroupId.value) selectedGroupId.value = groups.value[0].id; } if (tRes.ok) teachers.value = await tRes.json(); if (pRes.ok) plans.value = await pRes.json(); if (cRes.ok) curatorHours.value = await cRes.json(); if (termRes.ok) terms.value = await termRes.json(); selectedTermId.value = currentGroupTerms.value[0]?.id || null; };
     const selectAcademicYear = async id => { if (!id || Number(id) === Number(selectedAcademicYearId.value)) return; const res = await fetch(`/academic-years/${id}/activate`, { method: 'POST' }); if (!res.ok) return; selectedAcademicYearId.value = Number(id); localStorage.setItem('edusync-academic-year-id', String(id)); selectedTermId.value = null; await fetchData(); await fetchSchedule(); await fetchArchiveStatus(); };
-    const fetchSchedule = async () => { if (!selectedGroupId.value || !selectedTermId.value) { schedule.value = []; return; } const termParam = `&term_id=${selectedTermId.value}`; const [res, allRes] = await Promise.all([fetch(`/schedule/?group_id=${selectedGroupId.value}&week_number=${selectedWeek.value}${termParam}`), fetch(`/schedule/?week_number=${selectedWeek.value}`)]); if (res.ok) schedule.value = await res.json(); if (allRes.ok) allSchedule.value = await allRes.json(); };
-    const fetchArchiveStatus = async () => { if (!selectedGroupId.value) return; const [res, allRes] = await Promise.all([fetch(`/archived-weeks/status?group_id=${selectedGroupId.value}&week_number=${selectedWeek.value}`), fetch(`/archived-weeks/status-all?week_number=${selectedWeek.value}`)]); if (res.ok) isArchived.value = (await res.json()).is_archived; if (allRes.ok) isArchivedAll.value = (await allRes.json()).is_archived; };
+    const fetchSchedule = async () => {
+        const groupId = Number(selectedGroupId.value), termId = Number(selectedTermId.value), week = Number(selectedWeek.value);
+        const requestId = ++scheduleRequestId;
+        if (!groupId || !termId) { schedule.value = []; allSchedule.value = []; return; }
+        const [res, allRes] = await Promise.all([
+            fetch(`/schedule/?group_id=${groupId}&week_number=${week}&term_id=${termId}`),
+            fetch(`/schedule/?week_number=${week}`),
+        ]);
+        const [termSchedule, weekSchedule] = await Promise.all([
+            res.ok ? res.json() : [],
+            allRes.ok ? allRes.json() : [],
+        ]);
+        // Пользователь мог уже выбрать другой семестр или дату, пока шёл запрос.
+        if (requestId !== scheduleRequestId || groupId !== Number(selectedGroupId.value) || termId !== Number(selectedTermId.value) || week !== Number(selectedWeek.value)) return;
+        schedule.value = termSchedule;
+        allSchedule.value = weekSchedule;
+    };
+    const fetchArchiveStatus = async () => {
+        const groupId = Number(selectedGroupId.value), week = Number(selectedWeek.value);
+        const requestId = ++archiveRequestId;
+        if (!groupId) { isArchived.value = false; isArchivedAll.value = false; return; }
+        const [res, allRes] = await Promise.all([
+            fetch(`/archived-weeks/status?group_id=${groupId}&week_number=${week}`),
+            fetch(`/archived-weeks/status-all?week_number=${week}`),
+        ]);
+        const [groupStatus, allStatus] = await Promise.all([
+            res.ok ? res.json() : null,
+            allRes.ok ? allRes.json() : null,
+        ]);
+        if (requestId !== archiveRequestId || groupId !== Number(selectedGroupId.value) || week !== Number(selectedWeek.value)) return;
+        isArchived.value = Boolean(groupStatus?.is_archived);
+        isArchivedAll.value = Boolean(allStatus?.is_archived);
+    };
     const changeWeeklyHoursPrompt = async () => { const input = prompt(`Введите норму часов в неделю для Группы ${currentGroupNumber.value}:`, currentGroupWeeklyHours.value); if (input === null) return; const parsed = parseInt(input, 10); if (!isNaN(parsed) && parsed >= 2) { const res = await fetch(`/groups/${selectedGroupId.value}/set-weekly-hours`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weekly_hours: parsed }) }); if (res.ok) currentGroup.value.weekly_hours = (await res.json()).weekly_hours; } };
     const toggleSaturdayForGroup = async () => { const res = await fetch(`/groups/${selectedGroupId.value}/toggle-saturday`, { method: 'POST' }); if (res.ok) { currentGroup.value.has_saturday = (await res.json()).has_saturday; await fetchSchedule(); } };
     const toggleArchive = async () => { const res = await fetch('/archived-weeks/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selectedGroupId.value, week_number: selectedWeek.value }) }); if (res.ok) { isArchived.value = (await res.json()).is_archived; await fetchArchiveStatus(); } };

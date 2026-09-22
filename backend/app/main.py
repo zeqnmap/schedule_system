@@ -25,6 +25,12 @@ from sqlalchemy import or_, text, inspect
 from . import models, schemas, database, solver
 
 
+def calendar_week_for_date(year_start: date, target: date) -> int:
+    """Return the Monday-based timetable week containing target."""
+    year_monday = year_start - timedelta(days=year_start.isoweekday() - 1)
+    return max(1, ((target - year_monday).days // 7) + 1)
+
+
 def load_env_file():
     env_path = Path(__file__).resolve().parents[2] / ".env"
     if not env_path.exists():
@@ -668,7 +674,7 @@ def create_group_term(data: schemas.GroupTermCreate, _: models.User = Depends(re
     ).first()
     if overlap:
         raise HTTPException(status_code=409, detail=f"Даты пересекаются с периодом «{overlap.name}» этой группы")
-    start_week = max(1, ((data.start_date - year.start_date).days // 7) + 1)
+    start_week = calendar_week_for_date(year.start_date, data.start_date)
     weeks = max(1, ((data.end_date - data.start_date).days + 7) // 7)
     term = models.GroupTerm(academic_year_id=year.id, group_id=data.group_id, term_number=data.term_number, name=data.name, start_week=start_week, weeks=weeks, start_date=data.start_date, end_date=data.end_date, is_active=True, is_locked=False)
     db.add(term); db.commit(); db.refresh(term)
@@ -702,7 +708,7 @@ def update_group_term(term_id: int, data: schemas.GroupTermCreate, _: models.Use
     term.name = data.name.strip() or term.name
     term.start_date = data.start_date
     term.end_date = calculated_end
-    term.start_week = max(1, ((data.start_date - year.start_date).days // 7) + 1)
+    term.start_week = calendar_week_for_date(year.start_date, data.start_date)
     term.weeks = weeks
     db.commit(); db.refresh(term)
     return term
