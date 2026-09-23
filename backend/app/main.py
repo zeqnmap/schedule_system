@@ -1405,10 +1405,115 @@ def build_hours_statement_pdf(db: Session, group_id: int, start_date: date, end_
     return buffer
 
 
+def build_teacher_hours_statement_pdf(db: Session, teacher_id: int, start_date: date, end_date: date):
+    teacher = db.query(models.Teacher).filter_by(id=teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Преподаватель не найден")
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="Дата окончания раньше даты начала")
+
+    font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
+    if not font_path:
+        raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
+    pdfmetrics.registerFont(TTFont("TeacherStatementFont", font_path))
+    bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
+    pdfmetrics.registerFont(TTFont("TeacherStatementFont-Bold", bold_font_path))
+
+    groups = {group.id: group for group in db.query(models.Group).all()}
+    plans = db.query(models.CoursePlan).filter(
+        (models.CoursePlan.teacher_id == teacher_id) | (models.CoursePlan.teacher2_id == teacher_id)
+    ).all()
+    plan_by_group = {}
+    for plan in plans:
+        plan_by_group[plan.group_id] = plan_by_group.get(plan.group_id, 0) + int(plan.total_hours or 0)
+    entries = db.query(models.ScheduleEntry).filter(
+        (models.ScheduleEntry.teacher_id == teacher_id) | (models.ScheduleEntry.teacher2_id == teacher_id),
+        models.ScheduleEntry.status != "canceled",
+        models.ScheduleEntry.schedule_date.isnot(None),
+        models.ScheduleEntry.schedule_date >= start_date,
+        models.ScheduleEntry.schedule_date <= end_date,
+    ).order_by(models.ScheduleEntry.schedule_date, models.ScheduleEntry.time_slot).all()
+    actual = {}
+    for entry in entries:
+        actual[(entry.group_id, entry.schedule_date)] = actual.get((entry.group_id, entry.schedule_date), 0) + 1
+    group_ids = sorted(set(plan_by_group) | {entry.group_id for entry in entries}, key=lambda group_id: int(groups.get(group_id).number if groups.get(group_id) else group_id))
+    if not group_ids:
+        group_ids = []
+
+    buffer = io.BytesIO()
+    document = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=8 * mm, rightMargin=8 * mm, topMargin=9 * mm, bottomMargin=9 * mm)
+    title = ParagraphStyle("TeacherStatementTitle", fontName="TeacherStatementFont-Bold", fontSize=15, leading=18, alignment=1, textColor=colors.HexColor("#0f172a"), spaceAfter=2)
+    subtitle = ParagraphStyle("TeacherStatementSubtitle", fontName="TeacherStatementFont", fontSize=9, leading=12, alignment=1, textColor=colors.HexColor("#475569"), spaceAfter=4)
+    month_cell = ParagraphStyle("TeacherStatementMonthCell", fontName="TeacherStatementFont-Bold", fontSize=7, leading=8, alignment=0, textColor=colors.HexColor("#0f172a"))
+    months_ru = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+    story = [
+        Paragraph("УЧЁТ ЧАСОВ УЧЕБНОЙ РАБОТЫ", title),
+        Paragraph(f"Преподаватель: {escape(teacher.name)}  •  период: {start_date.strftime('%d.%m.%Y')} — {end_date.strftime('%d.%m.%Y')}", subtitle),
+        Spacer(1, 3 * mm),
+    ]
+    page_width = landscape(A4)[0] - document.leftMargin - document.rightMargin
+    months = []
+    month_start = date(start_date.year, start_date.month, 1)
+    while month_start <= end_date:
+        next_month = date(month_start.year + (month_start.month == 12), 1 if month_start.month == 12 else month_start.month + 1, 1)
+        visible_start, visible_end = max(start_date, month_start), min(end_date, next_month - timedelta(days=1))
+        days = [visible_start + timedelta(days=offset) for offset in range((visible_end - visible_start).days + 1)]
+        months.append((months_ru[month_start.month - 1], month_start.year, days))
+        month_start = next_month
+    groups_per_page = 12
+    chunks = [group_ids[index:index + groups_per_page] for index in range(0, len(group_ids), groups_per_page)] or [[]]
+    for chunk_index, chunk in enumerate(chunks):
+        if chunk_index:
+            story.append(PageBreak())
+        header = ["Месяц"] + [str(groups[group_id].number) for group_id in chunk] + ["Итого"]
+        rows = [header]
+        month_values = []
+        for month_name, year, days in months:
+            values = [sum(actual.get((group_id, day), 0) for day in days) or "" for group_id in chunk]
+            month_total = sum(value for value in values if isinstance(value, int))
+            month_values.append((values, month_total))
+            rows.append([Paragraph(escape(month_name), month_cell)] + values + [month_total or ""])
+        total_values = [sum(value for values, _ in month_values for value in [values[index]] if isinstance(value, int)) or "" for index in range(len(chunk))]
+        total_actual = sum(value for value in total_values if isinstance(value, int))
+        plan_values = [plan_by_group.get(group_id, 0) or "" for group_id in chunk]
+        plan_total = sum(plan_by_group.get(group_id, 0) for group_id in chunk)
+        rows.extend([
+            ["Всего"] + total_values + [total_actual or ""],
+            ["По плану"] + plan_values + [plan_total or ""],
+            ["Не выполнено"] + [max(0, (plan_by_group.get(group_id, 0) - (total_values[index] or 0))) or "" for index, group_id in enumerate(chunk)] + [max(0, plan_total - total_actual) or ""],
+            ["Сверх плана"] + [max(0, ((total_values[index] or 0) - plan_by_group.get(group_id, 0))) or "" for index, group_id in enumerate(chunk)] + [max(0, total_actual - plan_total) or ""],
+        ])
+        first_width = 23 * mm
+        group_width = (page_width - first_width) / max(1, len(chunk) + 1)
+        table = Table(rows, colWidths=[first_width] + [group_width] * (len(chunk) + 1), repeatRows=1)
+        style = [
+            ("FONTNAME", (0, 0), (-1, 0), "TeacherStatementFont-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")), ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("FONTNAME", (0, len(rows) - 4), (-1, -1), "TeacherStatementFont-Bold"), ("LINEABOVE", (0, len(rows) - 4), (-1, len(rows) - 4), 0.8, colors.HexColor("#0f172a")),
+        ]
+        for row_index in range(1, len(rows)):
+            if row_index % 2 == 0:
+                style.append(("BACKGROUND", (0, row_index), (-1, row_index), colors.HexColor("#f8fafc")))
+        table.setStyle(TableStyle(style))
+        story.append(table)
+    document.build(story)
+    buffer.seek(0)
+    return buffer
+
+
 @app.get("/export/hours-statement.pdf")
 def export_hours_statement_pdf(group_id: int, start_date: date, end_date: date, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
     filename = f"vedomost_group_{group_id}_{start_date.isoformat()}_{end_date.isoformat()}.pdf"
     return StreamingResponse(build_hours_statement_pdf(db, group_id, start_date, end_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/export/teacher-hours-statement.pdf")
+def export_teacher_hours_statement_pdf(teacher_id: int, start_date: date, end_date: date, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    filename = f"vedomost_teacher_{teacher_id}_{start_date.isoformat()}_{end_date.isoformat()}.pdf"
+    return StreamingResponse(build_teacher_hours_statement_pdf(db, teacher_id, start_date, end_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.get("/export/schedule.pdf")

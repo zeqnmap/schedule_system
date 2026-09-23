@@ -36,3 +36,4 @@ body.dark-theme .statement-note strong, body.dark-theme .date-summary strong { c
 body.dark-theme .statement-note p { color: #a8a8a8; }
 body.dark-theme .statement-calendar-day { color: #d4d4d4; }
 body.dark-theme .statement-calendar-day--between { background: #173d32; color: #6ee7b7; }
+body.dark-theme .bg-slate-100 { background: #303030 !important; }

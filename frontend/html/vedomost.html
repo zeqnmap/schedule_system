@@ -23,21 +23,33 @@
         </header>
 
         <section class="bento-card p-7 lg:p-9">
+            <div class="mb-6 flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1.5" role="tablist">
+                <button type="button" @click="mode = 'group'" :class="mode === 'group' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'" class="rounded-xl px-5 py-2.5 text-sm font-black transition-all">По группе</button>
+                <button type="button" @click="mode = 'teacher'" :class="mode === 'teacher' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'" class="rounded-xl px-5 py-2.5 text-sm font-black transition-all">По преподавателю</button>
+            </div>
             <div class="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
-                <div>
+                <div v-if="mode === 'group'">
                     <label class="field-label" for="statement-group">Учебная группа</label>
                     <select id="statement-group" v-model.number="selectedGroupId" class="input-modern w-full px-5 py-4 text-lg font-black text-slate-900">
                         <option :value="null" disabled>Выберите группу</option>
                         <option v-for="group in groups" :key="group.id" :value="group.id">Группа {{ group.number }}</option>
                     </select>
                 </div>
-                <button type="button" @click="openCalendar" :disabled="!selectedGroupId" class="btn-emerald statement-download rounded-2xl px-7 py-4 font-black disabled:opacity-45 disabled:cursor-not-allowed">
+                <div v-else>
+                    <label class="field-label" for="statement-teacher">Преподаватель</label>
+                    <select id="statement-teacher" v-model.number="selectedTeacherId" class="input-modern w-full px-5 py-4 text-lg font-black text-slate-900">
+                        <option :value="null" disabled>Выберите преподавателя</option>
+                        <option v-for="teacher in teachers" :key="teacher.id" :value="teacher.id">{{ teacher.name }}</option>
+                    </select>
+                </div>
+                <button type="button" @click="openCalendar" :disabled="mode === 'group' ? !selectedGroupId : !selectedTeacherId" class="btn-emerald statement-download rounded-2xl px-7 py-4 font-black disabled:opacity-45 disabled:cursor-not-allowed">
                     Скачать ведомость PDF
                 </button>
             </div>
             <div v-if="currentRange" class="mt-6 flex flex-wrap gap-3 text-sm font-bold text-slate-500">
                 <span class="range-chip">Доступные даты: {{ formatDate(currentRange.start) }} — {{ formatDate(currentRange.end) }}</span>
-                <span class="range-chip">Семестров: {{ groupTerms.length }}</span>
+                <span class="range-chip" v-if="mode === 'group'">Семестров: {{ groupTerms.length }}</span>
+                <span class="range-chip" v-else>Преподаватель: {{ selectedTeacher?.name || '—' }}</span>
             </div>
         </section>
 

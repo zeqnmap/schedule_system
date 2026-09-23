@@ -1,13 +1,16 @@
 const { createApp, ref, computed, onMounted, watch } = Vue;
 
 createApp({ setup() {
-    const groups = ref([]), terms = ref([]), selectedGroupId = ref(null);
+    const groups = ref([]), teachers = ref([]), terms = ref([]), selectedGroupId = ref(null), selectedTeacherId = ref(null), mode = ref('group');
     const calendarOpen = ref(false), startDate = ref(''), endDate = ref(''), calendarMonth = ref(''), errorMessage = ref('');
     const localDate = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
     const groupTerms = computed(() => terms.value.filter(term => Number(term.group_id) === Number(selectedGroupId.value)).sort((a, b) => String(a.start_date).localeCompare(String(b.start_date))));
+    const selectedTeacher = computed(() => teachers.value.find(teacher => Number(teacher.id) === Number(selectedTeacherId.value)));
+    const teacherTerms = computed(() => terms.value.filter(term => teachers.value.length && groups.value.some(group => Number(group.id) === Number(term.group_id))));
     const currentRange = computed(() => {
-        if (!groupTerms.value.length) return null;
-        return { start: groupTerms.value[0].start_date, end: groupTerms.value[groupTerms.value.length - 1].end_date };
+        const source = mode.value === 'teacher' ? teacherTerms.value : groupTerms.value;
+        if (!source.length) return null;
+        return { start: source.reduce((min, item) => item.start_date < min ? item.start_date : min, source[0].start_date), end: source.reduce((max, item) => item.end_date > max ? item.end_date : max, source[0].end_date) };
     });
     const calendarMonthDate = computed(() => new Date(`${calendarMonth.value || currentRange.value?.start || '2026-09-01'}T00:00:00`));
     const monthTitle = computed(() => calendarMonthDate.value.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }));
@@ -28,12 +31,14 @@ createApp({ setup() {
     const formatDate = value => value ? new Date(`${value}T00:00:00`).toLocaleDateString('ru-RU') : 'не выбрано';
     const load = async () => {
         const yearId = localStorage.getItem('edusync-academic-year-id');
-        const [groupsResponse, termsResponse] = await Promise.all([
-            fetch('/groups/'), fetch(`/group-terms/${yearId ? `?academic_year_id=${yearId}` : ''}`),
+        const [groupsResponse, teachersResponse, termsResponse] = await Promise.all([
+            fetch('/groups/'), fetch('/teachers/'), fetch(`/group-terms/${yearId ? `?academic_year_id=${yearId}` : ''}`),
         ]);
         if (groupsResponse.ok) groups.value = await groupsResponse.json();
+        if (teachersResponse.ok) teachers.value = await teachersResponse.json();
         if (termsResponse.ok) terms.value = await termsResponse.json();
         if (!selectedGroupId.value && groups.value.length) selectedGroupId.value = groups.value[0].id;
+        if (!selectedTeacherId.value && teachers.value.length) selectedTeacherId.value = teachers.value[0].id;
     };
     const resetPeriod = () => {
         if (!currentRange.value) return;
@@ -51,12 +56,13 @@ createApp({ setup() {
         if (day.value < startDate.value) { endDate.value = startDate.value; startDate.value = day.value; } else endDate.value = day.value;
     };
     const downloadStatement = () => {
-        if (!selectedGroupId.value || !startDate.value || !endDate.value) return;
+        if (!(mode.value === 'group' ? selectedGroupId.value : selectedTeacherId.value) || !startDate.value || !endDate.value) return;
         if (!endDate.value) { errorMessage.value = 'Выберите дату окончания периода.'; return; }
-        window.open(`/export/hours-statement.pdf?group_id=${selectedGroupId.value}&start_date=${startDate.value}&end_date=${endDate.value}`, '_blank');
+        const endpoint = mode.value === 'group' ? `/export/hours-statement.pdf?group_id=${selectedGroupId.value}` : `/export/teacher-hours-statement.pdf?teacher_id=${selectedTeacherId.value}`;
+        window.open(`${endpoint}&start_date=${startDate.value}&end_date=${endDate.value}`, '_blank');
         calendarOpen.value = false;
     };
-    watch(selectedGroupId, resetPeriod);
+    watch([selectedGroupId, selectedTeacherId, mode], resetPeriod);
     onMounted(load);
-    return { groups, selectedGroupId, groupTerms, currentRange, calendarOpen, startDate, endDate, calendarDays, monthTitle, canPreviousMonth, canNextMonth, errorMessage, formatDate, openCalendar, closeCalendar, previousMonth, nextMonth, selectDate, downloadStatement };
+    return { mode, groups, teachers, selectedGroupId, selectedTeacherId, selectedTeacher, groupTerms, currentRange, calendarOpen, startDate, endDate, calendarDays, monthTitle, canPreviousMonth, canNextMonth, errorMessage, formatDate, openCalendar, closeCalendar, previousMonth, nextMonth, selectDate, downloadStatement };
 } }).mount('#app');
