@@ -64,7 +64,7 @@ class CoursePlanBase(BaseModel):
     subject_name: str
     total_hours: int
     max_weekly_hours: int = 4
-    teacher_id: int
+    teacher_id: Optional[int] = None
     group_id: int
     teacher2_id: Optional[int] = None
     term_id: Optional[int] = None
