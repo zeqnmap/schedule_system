@@ -94,6 +94,16 @@ class AcademicDayOff(Base):
     title = Column(String, nullable=True)
 
 
+class GroupBreakDay(Base):
+    """A calendar break for one group (practice, field activity, etc.)."""
+    __tablename__ = "group_break_days"
+    id = Column(Integer, primary_key=True, index=True)
+    academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=False, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False, index=True)
+    day_date = Column(Date, nullable=False, index=True)
+    title = Column(String, nullable=True)
+
+
 class TeacherVacation(Base):
     __tablename__ = "teacher_vacations"
     id = Column(Integer, primary_key=True, index=True)
@@ -161,6 +171,22 @@ class CuratorHour(Base):
     hour_type = Column(String, default="curator", nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     group = relationship("Group")
+    teacher = relationship("Teacher")
+
+
+class GroupCuratorHourOverride(Base):
+    """A group-specific override for one occurrence of a common curator hour."""
+    __tablename__ = "group_curator_hour_overrides"
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False, index=True)
+    curator_hour_id = Column(Integer, ForeignKey("curator_hours.id"), nullable=False, index=True)
+    schedule_date = Column(Date, nullable=False, index=True)
+    teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
+    room_name = Column(String, nullable=True)
+    is_hidden = Column(Boolean, default=False, nullable=False)
+
+    group = relationship("Group")
+    curator_hour = relationship("CuratorHour")
     teacher = relationship("Teacher")
 
 

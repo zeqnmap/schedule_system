@@ -62,6 +62,13 @@ with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE curator_hours ADD COLUMN teacher_id INTEGER"))
     if "hour_type" not in curator_columns:
         connection.execute(text("ALTER TABLE curator_hours ADD COLUMN hour_type VARCHAR DEFAULT 'curator' NOT NULL"))
+override_columns = {column["name"] for column in inspect(database.engine).get_columns("group_curator_hour_overrides")}
+with database.engine.begin() as connection:
+    if "schedule_date" not in override_columns:
+        connection.execute(text("ALTER TABLE group_curator_hour_overrides ADD COLUMN schedule_date DATE"))
+        # Earlier versions applied an override to every week. They are invalid
+        # once overrides become date-specific, so restore those cards.
+        connection.execute(text("DELETE FROM group_curator_hour_overrides"))
 group_columns = {column["name"] for column in inspect(database.engine).get_columns("groups")}
 with database.engine.begin() as connection:
     if "curator_teacher_id" not in group_columns:
@@ -367,7 +374,14 @@ def update_teacher_vacation_weeks(teacher_id: int, data: schemas.TeacherVacation
     return teacher
 
 
-def remove_entries_for_dates(db: Session, academic_year_id: int, start_date: date, end_date: date, teacher_id: Optional[int] = None) -> int:
+def remove_entries_for_dates(
+    db: Session,
+    academic_year_id: int,
+    start_date: date,
+    end_date: date,
+    teacher_id: Optional[int] = None,
+    group_id: Optional[int] = None,
+) -> int:
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.academic_year_id == academic_year_id,
         models.ScheduleEntry.schedule_date >= start_date,
@@ -375,6 +389,8 @@ def remove_entries_for_dates(db: Session, academic_year_id: int, start_date: dat
     )
     if teacher_id is not None:
         query = query.filter(or_(models.ScheduleEntry.teacher_id == teacher_id, models.ScheduleEntry.teacher2_id == teacher_id))
+    if group_id is not None:
+        query = query.filter(models.ScheduleEntry.group_id == group_id)
     return query.delete(synchronize_session=False)
 
 
@@ -527,6 +543,100 @@ def delete_academic_day_off(day_off_id: int, _: models.User = Depends(require_ad
     if not day_off:
         raise HTTPException(status_code=404, detail="Выходной не найден")
     db.delete(day_off); db.commit()
+    return {"ok": True}
+
+
+@app.get("/group-break-days/", response_model=List[schemas.GroupBreakDayOut])
+def read_group_break_days(group_id: int, academic_year_id: int, db: Session = Depends(database.get_db)):
+    return db.query(models.GroupBreakDay).filter_by(
+        group_id=group_id, academic_year_id=academic_year_id
+    ).order_by(models.GroupBreakDay.day_date).all()
+
+
+@app.post("/group-break-days/", response_model=schemas.GroupBreakDayOut)
+def create_group_break_day(data: schemas.GroupBreakDayCreate, response: Response, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    group = db.query(models.Group).filter_by(id=data.group_id).first()
+    year = db.query(models.AcademicYear).filter_by(id=data.academic_year_id).first()
+    if not group or not year:
+        raise HTTPException(status_code=404, detail="Группа или учебный год не найдены")
+    in_group_term = db.query(models.GroupTerm).filter(
+        models.GroupTerm.group_id == data.group_id,
+        models.GroupTerm.academic_year_id == data.academic_year_id,
+        models.GroupTerm.start_date <= data.day_date,
+        models.GroupTerm.end_date >= data.day_date,
+    ).first()
+    if not in_group_term:
+        raise HTTPException(status_code=400, detail="Дата должна находиться в одном из семестров выбранной группы")
+    existing = db.query(models.GroupBreakDay).filter_by(
+        group_id=data.group_id, academic_year_id=data.academic_year_id, day_date=data.day_date
+    ).first()
+    if existing:
+        return existing
+    item = models.GroupBreakDay(**data.dict())
+    db.add(item)
+    removed = remove_entries_for_dates(
+        db, data.academic_year_id, data.day_date, data.day_date, group_id=data.group_id
+    )
+    db.commit(); db.refresh(item)
+    response.headers["X-Removed-Schedule-Entries"] = str(removed)
+    return item
+
+
+@app.post("/group-break-days/range/", response_model=List[schemas.GroupBreakDayOut])
+def create_group_break_range(data: schemas.GroupBreakRangeCreate, response: Response, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    group = db.query(models.Group).filter_by(id=data.group_id).first()
+    year = db.query(models.AcademicYear).filter_by(id=data.academic_year_id).first()
+    if not group or not year:
+        raise HTTPException(status_code=404, detail="Группа или учебный год не найдены")
+
+    start_date, end_date = sorted((data.start_date, data.end_date))
+    terms = db.query(models.GroupTerm).filter_by(
+        group_id=data.group_id, academic_year_id=data.academic_year_id
+    ).all()
+    if not terms:
+        raise HTTPException(status_code=400, detail="Для выбранной группы нет семестров в этом учебном году")
+
+    common_days_off = {
+        item.day_date for item in db.query(models.AcademicDayOff).filter_by(academic_year_id=data.academic_year_id).all()
+    }
+    existing_dates = {
+        item.day_date for item in db.query(models.GroupBreakDay).filter_by(
+            group_id=data.group_id, academic_year_id=data.academic_year_id
+        ).all()
+    }
+    new_items, removed = [], 0
+    current = start_date
+    while current <= end_date:
+        in_term = any(term.start_date <= current <= term.end_date for term in terms)
+        is_working_day = current.weekday() != 6 and (group.has_saturday or current.weekday() != 5)
+        if in_term and is_working_day and current not in common_days_off and current not in existing_dates:
+            item = models.GroupBreakDay(
+                academic_year_id=data.academic_year_id,
+                group_id=data.group_id,
+                day_date=current,
+                title=data.title or "Перерыв группы",
+            )
+            db.add(item)
+            new_items.append(item)
+            removed += remove_entries_for_dates(db, data.academic_year_id, current, current, group_id=data.group_id)
+        current += timedelta(days=1)
+
+    if not new_items:
+        raise HTTPException(status_code=400, detail="В выбранном диапазоне нет доступных учебных дней")
+    db.commit()
+    for item in new_items:
+        db.refresh(item)
+    response.headers["X-Removed-Schedule-Entries"] = str(removed)
+    response.headers["X-Added-Group-Break-Days"] = str(len(new_items))
+    return new_items
+
+
+@app.delete("/group-break-days/{break_day_id}")
+def delete_group_break_day(break_day_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    item = db.query(models.GroupBreakDay).filter_by(id=break_day_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Перерыв группы не найден")
+    db.delete(item); db.commit()
     return {"ok": True}
 
 
@@ -878,6 +988,39 @@ def read_curator_hours(_: models.User = Depends(require_user), db: Session = Dep
     return db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).order_by(models.CuratorHour.day_of_week, models.CuratorHour.time_slot).all()
 
 
+@app.get("/group-curator-hour-overrides/", response_model=List[schemas.GroupCuratorHourOverrideOut])
+def read_group_curator_hour_overrides(group_id: int, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    return db.query(models.GroupCuratorHourOverride).filter_by(group_id=group_id).all()
+
+
+@app.put("/group-curator-hour-overrides/{group_id}/{curator_hour_id}", response_model=schemas.GroupCuratorHourOverrideOut)
+def save_group_curator_hour_override(group_id: int, curator_hour_id: int, data: schemas.GroupCuratorHourOverrideCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    group = db.query(models.Group).filter_by(id=group_id).first()
+    hour = db.query(models.CuratorHour).filter(
+        models.CuratorHour.id == curator_hour_id,
+        models.CuratorHour.is_active.is_(True),
+        models.CuratorHour.group_id.in_([0, None]),
+    ).first()
+    if not group or not hour:
+        raise HTTPException(status_code=404, detail="Группа или общий час не найдены")
+    if data.schedule_date.isoweekday() != hour.day_of_week:
+        raise HTTPException(status_code=400, detail="Дата не соответствует дню этого часа")
+    if data.teacher_id is not None and not db.query(models.Teacher).filter_by(id=data.teacher_id).first():
+        raise HTTPException(status_code=404, detail="Преподаватель не найден")
+    room_name = (data.room_name or "").strip() or None
+    item = db.query(models.GroupCuratorHourOverride).filter_by(
+        group_id=group_id, curator_hour_id=curator_hour_id, schedule_date=data.schedule_date
+    ).first()
+    if not item:
+        item = models.GroupCuratorHourOverride(group_id=group_id, curator_hour_id=curator_hour_id, schedule_date=data.schedule_date)
+        db.add(item)
+    item.teacher_id = data.teacher_id
+    item.room_name = room_name
+    item.is_hidden = data.is_hidden
+    db.commit(); db.refresh(item)
+    return item
+
+
 @app.post("/curator-hours/", response_model=schemas.CuratorHourOut)
 def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     if not 1 <= data.day_of_week <= 6 or not 1 <= data.time_slot <= 12 or data.duration not in (1, 2):
@@ -1057,6 +1200,14 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     group_numbers = {group_id: group.number for group_id, group in group_records.items()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
     curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
+    curator_overrides = {
+        (item.group_id, item.curator_hour_id, item.schedule_date): item
+        for item in db.query(models.GroupCuratorHourOverride).all()
+    }
+    common_day_off = bool(schedule_date and db.query(models.AcademicDayOff).filter_by(day_date=schedule_date).first())
+    group_break_ids = {
+        item.group_id for item in db.query(models.GroupBreakDay).filter_by(day_date=schedule_date).all()
+    } if schedule_date else set()
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == week_number,
         models.ScheduleEntry.status != "canceled",
@@ -1118,14 +1269,20 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
         for item in day_curators:
             target_groups = [item.group_id] if item.group_id not in (0, None) else [group_id for group_id in group_numbers if (group_id, item.time_slot) not in specific_slots]
             for group_id in target_groups:
+                if common_day_off or group_id in group_break_ids:
+                    continue
+                override = curator_overrides.get((group_id, item.id, schedule_date)) if schedule_date else None
+                if override and override.is_hidden:
+                    continue
                 slot_label = str(item.time_slot) if item.duration == 1 else f"{item.time_slot}-{item.time_slot + item.duration - 1}"
                 group = group_records.get(group_id)
-                curator_teacher_id = item.teacher_id or getattr(group, "curator_teacher_id", None)
-                curator_room = item.room_name or getattr(group, "curator_room_name", None)
+                curator_teacher_id = override.teacher_id if override and override.teacher_id is not None else (item.teacher_id or getattr(group, "curator_teacher_id", None))
+                curator_room = override.room_name if override and override.room_name is not None else (item.room_name or getattr(group, "curator_room_name", None))
+                hour_name = "Информационный час" if item.hour_type == "information" else "Кураторский час"
                 rows_by_group.setdefault(group_id, []).append((
                     item.time_slot,
                     1,
-                    [str(group_numbers.get(group_id, group_id)), slot_label, "Кураторский час", curator_room or "-", teachers.get(curator_teacher_id, "Куратор не указан")],
+                    [str(group_numbers.get(group_id, group_id)), slot_label, hour_name, curator_room or "-", teachers.get(curator_teacher_id, "Куратор не указан")],
                     True,
                 ))
 
@@ -1189,6 +1346,14 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
     groups = {group_id: group.number for group_id, group in group_records.items()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
     curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
+    curator_overrides = {
+        (item.group_id, item.curator_hour_id, item.schedule_date): item
+        for item in db.query(models.GroupCuratorHourOverride).all()
+    }
+    common_day_off = bool(schedule_date and db.query(models.AcademicDayOff).filter_by(day_date=schedule_date).first())
+    group_break_ids = {
+        item.group_id for item in db.query(models.GroupBreakDay).filter_by(day_date=schedule_date).all()
+    } if schedule_date else set()
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == week_number,
         models.ScheduleEntry.status != "canceled",
@@ -1228,9 +1393,14 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
         for item in (item for item in curator_hours if item.day_of_week == selected_day):
             target_groups = [item.group_id] if item.group_id not in (0, None) else list(groups)
             for group_id in target_groups:
+                if common_day_off or group_id in group_break_ids:
+                    continue
+                override = curator_overrides.get((group_id, item.id, schedule_date)) if schedule_date else None
+                if override and override.is_hidden:
+                    continue
                 group = group_records.get(group_id)
-                curator_teacher_id = item.teacher_id or getattr(group, "curator_teacher_id", None)
-                curator_room = item.room_name or getattr(group, "curator_room_name", None)
+                curator_teacher_id = override.teacher_id if override and override.teacher_id is not None else (item.teacher_id or getattr(group, "curator_teacher_id", None))
+                curator_room = override.room_name if override and override.room_name is not None else (item.room_name or getattr(group, "curator_room_name", None))
                 if not curator_teacher_id:
                     continue
                 group_label = f"гр. {groups.get(group_id, group_id)}"
@@ -1240,7 +1410,7 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
                         existing["group"] = f"{existing['group']}, {group_label}"
                     else:
                         rows_by_teacher[curator_teacher_id][slot] = {
-                            "subject": "Кураторский час",
+                            "subject": "Информационный час" if item.hour_type == "information" else "Кураторский час",
                             "group": group_label,
                             "room": curator_room or "—",
                             "curator": True,
@@ -1516,15 +1686,27 @@ def export_teacher_hours_statement_pdf(teacher_id: int, start_date: date, end_da
     return StreamingResponse(build_teacher_hours_statement_pdf(db, teacher_id, start_date, end_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
+def resolved_export_schedule_date(db: Session, week_number: int, day: Optional[int], academic_year_id: Optional[int], fallback: Optional[date]) -> Optional[date]:
+    if day is None:
+        return fallback
+    year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first() if academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
+    if not year:
+        return fallback
+    first_monday = year.start_date - timedelta(days=year.start_date.isoweekday() - 1)
+    return first_monday + timedelta(days=(week_number - 1) * 7 + day - 1)
+
+
 @app.get("/export/schedule.pdf")
-def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
     date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
     filename = f"schedule_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
     return StreamingResponse(build_schedule_pdf(db, week_number, day, schedule_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.get("/export/teachers.pdf")
-def export_teachers_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+def export_teachers_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
     date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
     filename = f"teachers_schedule_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
     return StreamingResponse(build_teachers_schedule_pdf(db, week_number, day, schedule_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -1582,6 +1764,10 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
         raise HTTPException(status_code=409, detail="В воскресенье занятия не проводятся")
     if target_date and data.academic_year_id and db.query(models.AcademicDayOff).filter_by(academic_year_id=data.academic_year_id, day_date=target_date).first():
         raise HTTPException(status_code=409, detail="Эта дата объявлена общим выходным")
+    if target_date and data.academic_year_id and db.query(models.GroupBreakDay).filter_by(
+        academic_year_id=data.academic_year_id, group_id=data.group_id, day_date=target_date
+    ).first():
+        raise HTTPException(status_code=409, detail="Для этой группы установлен перерыв на выбранную дату")
     teacher_ids = {teacher_id for teacher_id in (data.teacher_id, data.teacher2_id) if teacher_id}
     selected_teachers = db.query(models.Teacher).filter(models.Teacher.id.in_(teacher_ids)).all()
     if len(selected_teachers) != len(teacher_ids):
@@ -1593,13 +1779,19 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
             raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} находится в отпуске на этой неделе")
         if is_teacher_on_date_vacation(teacher.id, data.academic_year_id, target_date, db):
             raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} находится в отпуске в эту дату")
-    blocked = db.query(models.CuratorHour).filter(
+    blocked_hours = db.query(models.CuratorHour).filter(
         models.CuratorHour.group_id.in_([0, data.group_id]),
         models.CuratorHour.day_of_week == data.day_of_week,
         models.CuratorHour.is_active.is_(True),
         models.CuratorHour.time_slot <= data.time_slot,
         models.CuratorHour.time_slot + models.CuratorHour.duration > data.time_slot,
-    ).first()
+    ).all()
+    hidden_hour_ids = {
+        item.curator_hour_id for item in db.query(models.GroupCuratorHourOverride).filter_by(
+            group_id=data.group_id, schedule_date=target_date, is_hidden=True
+        ).all()
+    }
+    blocked = next((item for item in blocked_hours if item.id not in hidden_hour_ids), None)
     if blocked:
         raise HTTPException(status_code=409, detail="Этот слот заблокирован кураторским часом")
     group = db.query(models.Group).filter_by(id=data.group_id).first()
@@ -1608,6 +1800,7 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
         models.CuratorHour.is_active.is_(True), models.CuratorHour.time_slot <= data.time_slot,
         models.CuratorHour.time_slot + models.CuratorHour.duration > data.time_slot,
     ).all()
+    global_hours = [item for item in global_hours if item.id not in hidden_hour_ids]
     if group and global_hours:
         if group.curator_teacher_id and group.curator_teacher_id in teacher_ids:
             raise HTTPException(status_code=409, detail="Куратор группы уже занят общим часом")

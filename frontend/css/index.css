@@ -11,6 +11,7 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 .lesson-action-shell--replacement { z-index: 20; background: transparent; }
 .lesson-action-shell--replacement .lesson-action-card { height: calc(100% - 14px); border-radius: 24px 24px 18px 18px; }
 .lesson-action-menu { position: absolute; inset: 6px 6px 6px auto; z-index: 10; width: 108px; display: grid; grid-template-columns: 1fr; grid-template-rows: repeat(3, 1fr); gap: 6px; opacity: 0; transform: translateX(20px); pointer-events: none; transition: opacity .16s ease, transform .24s ease; }
+.lesson-action-menu--two { grid-template-rows: repeat(2, 1fr); }
 .lesson-action-shell--open { z-index: 40; }
 .lesson-action-shell--open { border-color: #e2e8f0; }
 .lesson-action-shell--open .lesson-action-menu { opacity: 1; transform: translateX(0); pointer-events: auto; }

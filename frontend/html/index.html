@@ -109,7 +109,18 @@
                 <div v-for="slot in 12" :key="slot" class="group relative h-[130px] w-full perspective-1000">
 
                     <!-- Если слот ПУСТОЙ -->
-                    <div v-if="curatorHourAt(day, slot)" class="slot-card p-4 flex flex-col border border-slate-200 bg-white"><div class="absolute top-0 left-0 w-1.5 h-full bg-amber-400"></div><div class="flex justify-between items-start mb-1 relative z-20"><span class="text-lg">◷</span><span class="text-[10px] font-extrabold text-slate-300">{{ slot }} урок</span></div><div class="font-black text-sm leading-snug mb-auto relative z-20 text-slate-900">{{ curatorHourAt(day, slot).hour_type === 'information' ? 'Информационный час' : 'Кураторский час' }}</div><div class="text-[10px] font-bold text-amber-600 relative z-20">{{ curatorTeacherName(curatorHourAt(day, slot)) }} · Каб. {{ curatorRoomName(curatorHourAt(day, slot)) }}</div></div>
+                    <div v-if="curatorHourAt(day, slot)" class="lesson-action-shell" :class="{ 'lesson-action-shell--open': activeCardId === curatorCardId(curatorHourAt(day, slot)) }" @mouseleave="activeCardId = null">
+                        <div v-if="!isArchived" class="lesson-action-menu lesson-action-menu--two" @click.stop>
+                            <button @click="removeCuratorHourFromGroup(curatorHourAt(day, slot))" class="lesson-action-button lesson-action-button--delete">Удалить</button>
+                            <button @click="openCuratorEdit(curatorHourAt(day, slot))" class="lesson-action-edit">Изменить</button>
+                        </div>
+                        <div @click.stop="toggleCardActions(curatorCardId(curatorHourAt(day, slot)))" class="slot-card lesson-action-card p-4 flex flex-col border border-slate-200 bg-white cursor-pointer"><div class="absolute top-0 left-0 w-1.5 h-full bg-amber-400"></div><div class="flex justify-between items-start mb-1 relative z-20"><span class="text-lg">◷</span><span class="text-[10px] font-extrabold text-slate-300">{{ slot }} урок</span></div><div class="font-black text-sm leading-snug mb-auto relative z-20 text-slate-900">{{ curatorHourAt(day, slot).hour_type === 'information' ? 'Информационный час' : 'Кураторский час' }}</div><div class="text-[10px] font-bold text-amber-600 relative z-20">{{ curatorTeacherName(curatorHourAt(day, slot)) }} · Каб. {{ curatorRoomName(curatorHourAt(day, slot)) }}</div></div>
+                    </div>
+                    <div v-else-if="hiddenCuratorHourAt(day, slot) && getEntries(day, slot).length === 0" @click="!isArchived && restoreCuratorHourForGroup(hiddenCuratorHourAt(day, slot))"
+                         class="absolute inset-0 z-0 flex items-center justify-center border-2 border-dashed border-amber-200 bg-amber-50/40 rounded-2xl cursor-pointer hover:border-amber-400 transition-colors">
+                        <span class="text-[10px] font-extrabold text-amber-500 absolute top-3 left-4">{{ slot }} урок · час удалён</span>
+                        <span v-if="!isArchived" class="text-amber-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity bg-white shadow-sm px-4 py-2 rounded-xl text-sm">↩ Вернуть час</span>
+                    </div>
                     <div v-else-if="getEntries(day, slot).length === 0" @click="!isArchived && openCreateModal(day, slot)"
                          class="absolute inset-0 z-0 flex items-center justify-center border-2 border-dashed border-slate-200 bg-slate-50/50 rounded-2xl cursor-pointer hover:border-emerald-300 transition-colors">
                         <span class="text-[10px] font-extrabold text-slate-300 absolute top-3 left-4">{{ slot }} урок</span>
@@ -231,6 +242,19 @@
                             <button @click="saveEntry" class="btn-emerald font-extrabold py-3 px-8 rounded-2xl text-base">Сохранить</button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </Transition>
+
+        <Transition name="fade">
+            <div v-if="curatorEdit" class="fixed inset-0 modal-glass flex items-center justify-center z-[100] p-6">
+                <div class="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
+                    <div class="p-8 border-b border-slate-100 flex justify-between items-center"><div><h3 class="text-2xl font-black text-slate-900 tracking-tight">{{ curatorEdit.hour_type === 'information' ? 'Информационный час' : 'Кураторский час' }}</h3><p class="mt-1 text-sm font-semibold text-slate-500">Изменения применяются только к выбранной группе.</p></div><button @click="curatorEdit = null" class="text-slate-400 hover:text-slate-900 text-xl font-bold transition-colors">✕</button></div>
+                    <div class="p-8 space-y-5 bg-slate-50/50">
+                        <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest">Кто ведёт<select v-model.number="curatorEdit.teacher_id" class="input-modern mt-2 w-full px-5 py-4 text-slate-900 font-bold text-sm"><option :value="null">Не указан</option><option v-for="teacher in teachers" :key="teacher.id" :value="teacher.id">{{ teacher.name }}</option></select></label>
+                        <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest">Кабинет<select v-model="curatorEdit.room_name" class="input-modern mt-2 w-full px-5 py-4 text-slate-900 font-bold text-sm"><option value="">Не указан</option><option v-for="room in rooms" :key="room.id" :value="room.name">Каб. {{ room.name }}</option></select></label>
+                    </div>
+                    <div class="p-8 border-t border-slate-100 flex justify-end gap-3 bg-white"><button @click="curatorEdit = null" class="px-6 py-3 text-slate-600 hover:bg-slate-100 font-bold rounded-2xl">Отмена</button><button @click="saveCuratorEdit" class="btn-emerald font-extrabold py-3 px-8 rounded-2xl">Сохранить</button></div>
                 </div>
             </div>
         </Transition>

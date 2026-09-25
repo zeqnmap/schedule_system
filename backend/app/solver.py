@@ -170,48 +170,48 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
         teacher.id: next((room.name for room in rooms if room.id == teacher.room_id), None)
         for teacher in teachers
     }
+    year_by_group = {group.id: db.query(models.AcademicYear).filter_by(id=terms_by_group[group.id].academic_year_id).first() for group in groups}
     curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
-    blocked = {
-        (group.id, item.day_of_week - 1, item.time_slot - 1 + offset)
-        for group in groups
-        for item in curator_hours
-        if item.group_id in (0, None, group.id)
-        for offset in range(item.duration)
+    overrides = {
+        (item.group_id, item.curator_hour_id, item.schedule_date): item
+        for item in db.query(models.GroupCuratorHourOverride).filter(
+            models.GroupCuratorHourOverride.group_id.in_([group.id for group in groups])
+        ).all()
     }
-    curator_teacher_slots = {
-        (item.teacher_id, item.day_of_week - 1, item.time_slot - 1 + offset)
-        for item in curator_hours if item.teacher_id
-        for offset in range(item.duration)
-    }
-    curator_room_slots = {
-        (item.room_name.strip(), item.day_of_week - 1, item.time_slot - 1 + offset)
-        for item in curator_hours if item.room_name and item.room_name.strip()
-        for offset in range(item.duration)
-    }
-    # Global slots use each group's curator assignment from the directory.
-    for item in curator_hours:
-        if item.group_id in (0, None):
-            for group in groups:
-                teacher_id = getattr(group, "curator_teacher_id", None)
+    blocked, curator_teacher_slots, curator_room_slots = set(), set(), set()
+    # Common settings stay unchanged; a manual group override only changes this
+    # group's card and the resources reserved by that particular card.
+    for group in groups:
+        for item in curator_hours:
+            occurrence_date = calendar_date_for_slot(year_by_group[group.id], week, item.day_of_week - 1)
+            override = overrides.get((group.id, item.id, occurrence_date))
+            if override and override.is_hidden:
+                continue
+            teacher_id = override.teacher_id if override and override.teacher_id is not None else (item.teacher_id or getattr(group, "curator_teacher_id", None))
+            room_name = override.room_name if override and override.room_name is not None else (item.room_name or getattr(group, "curator_room_name", None))
+            for offset in range(item.duration):
+                slot = item.time_slot - 1 + offset
+                blocked.add((group.id, item.day_of_week - 1, slot))
                 if teacher_id:
-                    for offset in range(item.duration):
-                        curator_teacher_slots.add((teacher_id, item.day_of_week - 1, item.time_slot - 1 + offset))
-                room_name = getattr(group, "curator_room_name", None)
+                    curator_teacher_slots.add((teacher_id, item.day_of_week - 1, slot))
                 if room_name:
-                    for offset in range(item.duration):
-                        curator_room_slots.add((room_name.strip(), item.day_of_week - 1, item.time_slot - 1 + offset))
+                    curator_room_slots.add((room_name.strip(), item.day_of_week - 1, slot))
 
     model = cp_model.CpModel()
     lesson, pair, single, pair_starts = {}, {}, {}, {}
     objective = []
-    year_by_group = {group.id: db.query(models.AcademicYear).filter_by(id=terms_by_group[group.id].academic_year_id).first() for group in groups}
     days_off = {(item.academic_year_id, item.day_date) for item in db.query(models.AcademicDayOff).all()}
+    group_breaks = {(item.group_id, item.academic_year_id, item.day_date) for item in db.query(models.GroupBreakDay).all()}
     vacations = db.query(models.TeacherVacation).all()
 
     def date_available(group, day_index):
         term, year = terms_by_group[group.id], year_by_group[group.id]
         target = calendar_date_for_slot(year, week, day_index)
-        return term.start_date <= target <= term.end_date and (year.id, target) not in days_off
+        return (
+            term.start_date <= target <= term.end_date
+            and (year.id, target) not in days_off
+            and (group.id, year.id, target) not in group_breaks
+        )
 
     def teacher_available(teacher_id, group, day_index):
         target = calendar_date_for_slot(year_by_group[group.id], week, day_index)

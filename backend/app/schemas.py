@@ -191,6 +191,27 @@ class AcademicDayOffOut(AcademicDayOffCreate):
     class Config: from_attributes = True
 
 
+class GroupBreakDayCreate(BaseModel):
+    academic_year_id: int
+    group_id: int
+    day_date: date
+    title: Optional[str] = None
+
+
+class GroupBreakDayOut(GroupBreakDayCreate):
+    id: int
+
+    class Config: from_attributes = True
+
+
+class GroupBreakRangeCreate(BaseModel):
+    academic_year_id: int
+    group_id: int
+    start_date: date
+    end_date: date
+    title: Optional[str] = None
+
+
 class TeacherVacationCreate(BaseModel):
     teacher_id: int
     academic_year_id: int
@@ -253,6 +274,21 @@ class CuratorHourOut(CuratorHourCreate):
     id: int
     group_id: Optional[int] = None
     is_active: bool = True
+
+    class Config: from_attributes = True
+
+
+class GroupCuratorHourOverrideCreate(BaseModel):
+    schedule_date: date
+    teacher_id: Optional[int] = None
+    room_name: Optional[str] = None
+    is_hidden: bool = False
+
+
+class GroupCuratorHourOverrideOut(GroupCuratorHourOverrideCreate):
+    id: int
+    group_id: int
+    curator_hour_id: int
 
     class Config: from_attributes = True
 

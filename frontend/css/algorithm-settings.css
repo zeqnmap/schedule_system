@@ -18,7 +18,26 @@ body.dark-theme .compact-curator-settings form > div.grid {
 .algorithm-calendar-day--off { background: #ecfdf5; border-color: #34d399; color: #047857; }
 .algorithm-calendar-day--disabled { cursor: default; opacity: .35; background: #f8fafc; }
 .algorithm-calendar-day--disabled:hover { border-color: #e2e8f0; color: #334155; }
+.group-break-card { border-color: rgba(16, 185, 129, .25); }
+.group-break-counter { border-radius: 999px; background: #ecfdf5; color: #047857; padding: 8px 12px; font-size: 12px; font-weight: 900; white-space: nowrap; }
+.group-break-calendar { min-width: 0; border-radius: 18px; border: 1px solid #d1fae5; background: #f7fffb; padding: 16px; }
+.group-break-list { display: flex; max-height: 174px; flex-wrap: wrap; gap: 7px; overflow-y: auto; padding-right: 4px; }
+.group-break-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; background: #ecfdf5; color: #047857; padding: 7px 10px; font-size: 11px; font-weight: 800; transition: .15s ease; }
+.group-break-chip:hover { background: #d1fae5; }
+.group-break-chip span { font-size: 15px; line-height: 10px; }
+.group-break-range { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-radius: 12px; background: #ecfdf5; color: #047857; padding: 9px 10px; font-size: 11px; font-weight: 800; }
+.group-break-range button { color: #047857; text-decoration: underline; }
+.group-break-calendar-day--selected { background: #059669; border-color: #059669; color: #fff; }
+.group-break-calendar-day--selected:hover { border-color: #047857; color: #fff; }
+.group-break-calendar-day--range-start { box-shadow: 0 0 0 3px #a7f3d0; }
+.group-break-calendar-day--common-off { background: #ecfdf5; border-color: #86efac; color: #047857; }
 body.dark-theme .calendar-nav { background: #303030; color: #e5e7eb; }
 body.dark-theme .algorithm-calendar-day { border-color: #454545; color: #e5e7eb; }
 body.dark-theme .algorithm-calendar-day--off { background: #173d32; border-color: #296a54; color: #6ee7b7; }
 body.dark-theme .algorithm-calendar-day--disabled { background: #202020; }
+body.dark-theme .group-break-card { border-color: rgba(52, 211, 153, .28); }
+body.dark-theme .group-break-counter { background: #173d32; color: #6ee7b7; }
+body.dark-theme .group-break-calendar { border-color: #296a54; background: #202020; }
+body.dark-theme .group-break-chip, body.dark-theme .group-break-range { background: #173d32; color: #a7f3d0; }
+body.dark-theme .group-break-calendar-day--selected { background: #059669; border-color: #059669; color: #fff; }
+body.dark-theme .group-break-calendar-day--common-off { background: #173d32; border-color: #296a54; color: #6ee7b7; }
