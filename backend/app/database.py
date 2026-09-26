@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# База будет сохраняться в файл schedule_611_621.db в корне проекта
-SQLALCHEMY_DATABASE_URL = "sqlite:///./schedule_611_621.db"
+# Рабочая база подключена к файлу, который пробрасывает Docker Compose.
+SQLALCHEMY_DATABASE_URL = "sqlite:///./schedule.db"
 
 # check_same_thread=False нужно только для SQLite в FastAPI
 engine = create_engine(
