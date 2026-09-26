@@ -245,6 +245,7 @@ class AlgorithmRuleBase(BaseModel):
     subject_name: str
     course: Optional[int] = None
     group_id: Optional[int] = None
+    term_number: Optional[int] = None
     weekly_hours: int
     lesson_mode: str = "auto"
     is_required: bool = True

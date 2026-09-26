@@ -75,11 +75,12 @@ class SubjectDemand:
         return list({item for item in (self.plan.teacher_id, self.plan.teacher2_id) if item})
 
 
-def find_rule_for_plan(plan, group, rules):
+def find_rule_for_plan(plan, group, rules, term_number=None):
     matches = [
         rule for rule in rules
         if rule.is_active and rule.is_required
         and rule.subject_name.strip().casefold() == plan.subject_name.strip().casefold()
+        and (rule.term_number is None or rule.term_number == term_number)
         and ((rule.group_id is not None and rule.group_id == group.id)
              or (rule.group_id is None and rule.course == group.course))
     ]
@@ -112,7 +113,7 @@ def build_subject_demands(db, groups, course_plans, rules, week, terms_by_group)
         term = terms_by_group.get(plan.group_id)
         if not group or not term or plan.term_id != term.id:
             continue
-        rule = find_rule_for_plan(plan, group, rules)
+        rule = find_rule_for_plan(plan, group, rules, term.term_number)
         limit = rule.weekly_hours if rule else (plan.max_weekly_hours or 4)
         remaining = max(0, int(plan.total_hours or 0) - consumed_hours(db, plan, before_week=week))
         if remaining:
@@ -136,7 +137,7 @@ def mode_limits(demand, remaining):
     return weekly // 2, weekly % 2
 
 
-def validate_rules(groups, course_plans, rules):
+def validate_rules(groups, terms, course_plans, rules):
     errors = []
     for rule in rules:
         if not rule.is_active or not rule.is_required:
@@ -154,13 +155,15 @@ def validate_rules(groups, course_plans, rules):
         if rule.weekly_hours < 1:
             errors.append(f"Правило '{rule.subject_name}': недельная нагрузка должна быть положительной.")
         for group in selected:
-            plans = [
-                plan for plan in course_plans
-                if plan.group_id == group.id
-                and plan.subject_name.strip().casefold() == rule.subject_name.strip().casefold()
-            ]
-            if plans and len(plans) != 1:
-                errors.append(f"Гр. {group.number}: для правила '{rule.subject_name}' нужен ровно один учебный план.")
+            group_terms = [term for term in terms if term.group_id == group.id and (rule.term_number is None or term.term_number == rule.term_number)]
+            for term in group_terms:
+                plans = [
+                    plan for plan in course_plans
+                    if plan.group_id == group.id and plan.term_id == term.id
+                    and plan.subject_name.strip().casefold() == rule.subject_name.strip().casefold()
+                ]
+                if plans and len(plans) != 1:
+                    errors.append(f"Гр. {group.number}, {term.name}: для правила '{rule.subject_name}' нужен ровно один учебный план.")
     return errors
 
 
@@ -247,6 +250,13 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
             singles = [single[group.id, day, slot, demand.id] for day in range(days) for slot in range(SLOTS_PER_DAY)]
             model.Add(sum(pairs) <= max_pairs)
             model.Add(sum(singles) <= max_singles)
+
+            # "Only lessons" means separate lessons, not several consecutive
+            # lessons of the same subject on one day.  Spread the weekly load
+            # across available days (e.g. 3 h/week → three different days).
+            if demand.mode == "lessons":
+                for day in range(days):
+                    model.Add(sum(single[group.id, day, slot, demand.id] for slot in range(SLOTS_PER_DAY)) <= 1)
 
             total = sum(lesson[group.id, day, slot, demand.id] for day in range(days) for slot in range(SLOTS_PER_DAY))
             term = terms_by_group[group.id]
@@ -441,7 +451,7 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
     return True, f"Неделя {week}: создано безопасное расписание."
 
 
-def trigger_global_generation(db: Session, approve_adjustments: bool = False):
+def trigger_global_generation(db: Session, approve_adjustments: bool = False, term_number: int | None = None):
     teachers = db.query(models.Teacher).filter_by(is_active=True).all()
     groups = db.query(models.Group).all()
     rooms = db.query(models.Room).all()
@@ -462,15 +472,16 @@ def trigger_global_generation(db: Session, approve_adjustments: bool = False):
         db.query(models.ScheduleEntry).filter(models.ScheduleEntry.group_id == group.id, models.ScheduleEntry.term_id.is_(None)).update({"term_id": term.id}, synchronize_session=False)
         terms.append(term)
     db.commit()
-    unlocked_terms = [term for term in terms if not term.is_locked]
+    unlocked_terms = [term for term in terms if not term.is_locked and (term_number is None or term.term_number == term_number)]
     if not unlocked_terms:
-        return False, "Нет открытых семестров для генерации. Завершённые семестры доступны только для ручного редактирования."
+        selected = f"{term_number}-й семестр" if term_number else "выбранные семестры"
+        return False, f"Нет открытых семестров для генерации: {selected}. Завершённые семестры доступны только для ручного редактирования."
     course_plans = db.query(models.CoursePlan).filter(models.CoursePlan.term_id.in_([term.id for term in unlocked_terms])).all()
     rules = db.query(models.AlgorithmRule).filter_by(is_active=True).all()
     if not groups:
         return False, "Нет групп для генерации."
 
-    errors = validate_rules(groups, course_plans, rules)
+    errors = validate_rules(groups, unlocked_terms, course_plans, rules)
     if errors:
         return False, "ОШИБКИ В НАСТРОЙКАХ АЛГОРИТМА:\n" + "\n".join(errors)
 
@@ -506,7 +517,8 @@ def trigger_global_generation(db: Session, approve_adjustments: bool = False):
             group = next((item for item in groups if item.id == plan.group_id), None)
             shortages.append(f"Гр. {group.number if group else plan.group_id}, {plan.subject_name}: не доставлено {missing} ч.")
 
-    result = f"Расписание создано для открытых семестров до {max_weeks}-й календарной недели без накладок."
+    selected = f"{term_number}-го семестра" if term_number else "всех открытых семестров"
+    result = f"Расписание создано для {selected} до {max_weeks}-й календарной недели без накладок."
     if shortages:
         result += "\n\nНЕДОСТАВЛЕННЫЕ ЧАСЫ — измените планы вручную:\n" + "\n".join(shortages)
     return True, result

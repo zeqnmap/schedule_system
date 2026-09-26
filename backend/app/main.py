@@ -62,6 +62,10 @@ with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE curator_hours ADD COLUMN teacher_id INTEGER"))
     if "hour_type" not in curator_columns:
         connection.execute(text("ALTER TABLE curator_hours ADD COLUMN hour_type VARCHAR DEFAULT 'curator' NOT NULL"))
+rule_columns = {column["name"] for column in inspect(database.engine).get_columns("algorithm_rules")}
+with database.engine.begin() as connection:
+    if "term_number" not in rule_columns:
+        connection.execute(text("ALTER TABLE algorithm_rules ADD COLUMN term_number INTEGER"))
 override_columns = {column["name"] for column in inspect(database.engine).get_columns("group_curator_hour_overrides")}
 with database.engine.begin() as connection:
     if "schedule_date" not in override_columns:
@@ -966,6 +970,8 @@ def create_algorithm_rule(data: schemas.AlgorithmRuleCreate, _: models.User = De
         raise HTTPException(status_code=400, detail="Выберите курс или конкретную группу")
     if data.lesson_mode not in {"auto", "lessons", "pairs", "pair_and_lesson"}:
         raise HTTPException(status_code=400, detail="Неизвестный режим занятий")
+    if data.term_number not in (None, 1, 2):
+        raise HTTPException(status_code=400, detail="Можно выбрать только 1-й или 2-й семестр")
     rule = models.AlgorithmRule(**data.dict(exclude={"subject_name"}), subject_name=data.subject_name.strip())
     db.add(rule)
     db.commit()
@@ -1171,9 +1177,10 @@ def toggle_archive_all(data: schemas.ArchivedWeekAllToggle, db: Session = Depend
     return {"is_archived": target_state, "archived_count": len(group_ids) if target_state else 0, "total_groups": len(group_ids)}
 
 @app.post("/generate_schedule/", response_model=schemas.GenerateResponse)
-def trigger_generation(approve_adjustments: bool = False, db: Session = Depends(database.get_db)):
-    # Генерируем ВЕСЬ семестр сразу
-    success, msg = solver.trigger_global_generation(db, approve_adjustments=approve_adjustments)
+def trigger_generation(approve_adjustments: bool = False, term_number: Optional[int] = None, db: Session = Depends(database.get_db)):
+    if term_number not in (None, 1, 2):
+        raise HTTPException(status_code=400, detail="Можно генерировать 1-й, 2-й либо все семестры")
+    success, msg = solver.trigger_global_generation(db, approve_adjustments=approve_adjustments, term_number=term_number)
     if not success:
         raise HTTPException(status_code=400, detail=msg)
     return {"status": "success", "message": msg}

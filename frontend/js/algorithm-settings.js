@@ -7,7 +7,7 @@ createApp({ setup() {
     const curatorForms = ref([{ day_of_week: 1, time_slot: 1, duration: 1 }, { day_of_week: 2, time_slot: 1, duration: 1 }]);
     const curatorAssignments = ref({});
     const days = ['', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-    const form = ref({ subject_name: '', course: 1, group_id: null, weekly_hours: 3, lesson_mode: 'auto' });
+    const form = ref({ subject_name: '', course: 1, group_id: null, term_number: null, weekly_hours: 3, lesson_mode: 'auto' });
     const courses = computed(() => [...new Set(groups.value.map(group => group.course))].sort((a, b) => a - b));
     const activeYear = computed(() => years.value.find(year => year.is_active) || null);
     const localDate = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
@@ -85,6 +85,7 @@ createApp({ setup() {
     const createCuratorHour = async () => { try { await request('/curator-hours/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(curatorForm.value) }); await load(); } catch (err) { error.value = err.message; } };
     const removeCuratorHour = async item => { try { await request(`/curator-hours/${item.id}`, { method: 'DELETE' }); await load(); } catch (err) { error.value = err.message; } };
     const scopeLabel = rule => rule.group_id ? `Группа ${groups.value.find(group => group.id === rule.group_id)?.number || rule.group_id}` : `${rule.course} курс`;
+    const termLabel = rule => rule.term_number ? `${rule.term_number} семестр` : 'Все семестры';
     const modeLabel = mode => ({ auto: 'Авто: пары и уроки', lessons: 'Только уроки', pairs: 'Только пары', pair_and_lesson: '1 пара + 1 урок' })[mode] || mode;
     const availableCuratorRooms = (groupId, index = 0) => {
         const currentTime = curatorForms.value[index] || curatorForms.value[0];
@@ -100,5 +101,5 @@ createApp({ setup() {
         const current = curatorAssignments.value[groupId]?.[index]?.room_name;
         return rooms.value.filter(room => room.name === current || !selectedElsewhere.has(room.name));
     };
-    onMounted(load); return { subjects, groups, teachers, rooms, rules, curatorHours, curatorAssignments, days, curatorCount, curatorForms, curatorForm: curatorForms.value[0], error, notice, scope, form, courses, calendarMonth, calendarTitle, calendarDays, breakGroupId, breakGroup, groupBreaks, breakRangeStart, breakCalendarMonth, breakCalendarTitle, breakCalendarDays, selectBreakGroup, toggleGroupBreak, previousBreakMonth, nextBreakMonth, formatBreakDate, load, createRule, removeRule, createCuratorHours, createCuratorHour, removeCuratorHour, toggleDayOff, previousMonth, nextMonth, scopeLabel, modeLabel, availableCuratorRooms };
+    onMounted(load); return { subjects, groups, teachers, rooms, rules, curatorHours, curatorAssignments, days, curatorCount, curatorForms, curatorForm: curatorForms.value[0], error, notice, scope, form, courses, calendarMonth, calendarTitle, calendarDays, breakGroupId, breakGroup, groupBreaks, breakRangeStart, breakCalendarMonth, breakCalendarTitle, breakCalendarDays, selectBreakGroup, toggleGroupBreak, previousBreakMonth, nextBreakMonth, formatBreakDate, load, createRule, removeRule, createCuratorHours, createCuratorHour, removeCuratorHour, toggleDayOff, previousMonth, nextMonth, scopeLabel, termLabel, modeLabel, availableCuratorRooms };
 } }).mount('#app');

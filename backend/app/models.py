@@ -151,6 +151,7 @@ class AlgorithmRule(Base):
     subject_name = Column(String, nullable=False, index=True)
     course = Column(Integer, nullable=True, index=True)
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=True, index=True)
+    term_number = Column(Integer, nullable=True, index=True)
     weekly_hours = Column(Integer, nullable=False)
     lesson_mode = Column(String, default="auto", nullable=False)
     is_required = Column(Boolean, default=True, nullable=False)

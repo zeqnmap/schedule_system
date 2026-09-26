@@ -49,12 +49,22 @@
                 <p class="text-lg lg:text-xl text-slate-500 font-medium">Слой реальности: отмены, замены и фиксация факта</p>
             </div>
             <div class="flex gap-3 mt-6 lg:mt-0">
-                <button @click="generateScheduleAll" class="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-base px-8 py-4 rounded-2xl flex items-center gap-3 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.5)] transition-all">
+                <button @click="openGenerationDialog" class="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-base px-8 py-4 rounded-2xl flex items-center gap-3 shadow-[0_8px_24px_-6px_rgba(79,70,229,0.5)] transition-all">
                     <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
-                    <span>Сгенерировать ВЕСЬ СЕМЕСТР</span>
+                    <span>Сгенерировать расписание</span>
                 </button>
             </div>
         </header>
+
+        <Transition name="fade">
+            <div v-if="generationScope" class="fixed inset-0 modal-glass flex items-center justify-center z-[100] p-6">
+                <div class="bg-white rounded-[32px] shadow-2xl w-full max-w-xl overflow-hidden border border-slate-200">
+                    <div class="p-8 border-b border-slate-100 flex justify-between items-start"><div><h3 class="text-2xl font-black text-slate-900">Что сгенерировать?</h3><p class="mt-2 text-sm font-semibold leading-relaxed text-slate-500">Будут перезаписаны только плановые занятия выбранных открытых семестров. Другой семестр и ручные изменения не затрагиваются.</p></div><button @click="generationScope = null" class="text-slate-400 hover:text-slate-900 text-xl font-bold">✕</button></div>
+                    <div class="p-8 grid gap-3 sm:grid-cols-3 bg-slate-50/50"><button v-for="scope in [1, 2, 'all']" :key="scope" @click="generationScope = scope" :class="generationScope === scope ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300'" class="rounded-2xl border p-4 text-left transition"><strong class="block text-base">{{ generationLabel(scope) }}</strong><span class="mt-1 block text-xs font-semibold opacity-70">{{ scope === 'all' ? '1-й и 2-й' : 'Только выбранный' }}</span></button></div>
+                    <div class="p-8 border-t border-slate-100 flex justify-end gap-3"><button @click="generationScope = null" class="px-6 py-3 text-slate-600 hover:bg-slate-100 font-bold rounded-2xl">Отмена</button><button @click="generateScheduleAll" class="btn-emerald px-7 py-3 rounded-2xl font-extrabold">Сгенерировать</button></div>
+                </div>
+            </div>
+        </Transition>
 
         <div class="bento-card p-6 mb-10 flex flex-wrap gap-6 items-center justify-between">
             <div class="flex flex-wrap items-center gap-4 w-full xl:w-auto">

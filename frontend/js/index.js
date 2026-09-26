@@ -3,7 +3,7 @@ createApp({ setup() {
     const groups = ref([]), teachers = ref([]), rooms = ref([]), plans = ref([]), schedule = ref([]), allSchedule = ref([]), curatorHours = ref([]), curatorOverrides = ref([]), daysOff = ref([]), groupBreakDays = ref([]), terms = ref([]), academicYears = ref([]);
     const selectedAcademicYearId = ref(Number(localStorage.getItem('edusync-academic-year-id')) || null);
     const selectedGroupId = ref(null), selectedTermId = ref(null), selectedWeek = ref(1), selectedDate = ref(''), isArchived = ref(false), isArchivedAll = ref(false), isGenerating = ref(false);
-    const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), activeCardId = ref(null), curatorEdit = ref(null), errorMessage = ref('');
+    const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), activeCardId = ref(null), curatorEdit = ref(null), generationScope = ref(null), errorMessage = ref('');
     let scheduleRequestId = 0;
     let archiveRequestId = 0;
     const currentGroup = computed(() => groups.value.find(gr => Number(gr.id) === Number(selectedGroupId.value)));
@@ -186,7 +186,23 @@ createApp({ setup() {
     const deleteCardEntry = async entry => { if (!confirm('Удалить занятие без возможности восстановления?')) return; const response = await fetch(`/schedule/${entry.id}`, { method: 'DELETE' }); if (response.ok) { activeCardId.value = null; await fetchSchedule(); } };
     const cancelCardEntry = async entry => { const response = await fetch(`/schedule/${entry.id}/cancel`, { method: 'POST' }); if (response.ok) { activeCardId.value = null; await fetchSchedule(); } };
     const restoreCardEntry = async entry => { const response = await fetch(`/schedule/${entry.id}/restore`, { method: 'POST' }); if (response.ok) { activeCardId.value = null; await fetchSchedule(); } };
-    const generateScheduleAll = async () => { if (!confirm('Запустить глобальную генерацию на ВЕСЬ СЕМЕСТР для всех групп?\nЭто займет до 60 секунд.')) return; isGenerating.value = true; errorMessage.value = ''; try { let res = await fetch('/generate_schedule/', { method: 'POST' }); let data = await res.json(); if (!res.ok && data.detail && (data.detail.includes('НЕ ХВАТАЕТ') || data.detail.includes('ограничения несовместимы') || data.detail.includes('Математический тупик'))) { const action = confirm(data.detail + '\n\nНажмите OK, чтобы исправить автоматически безопасным режимом (без накладок), или Отмена для ручного исправления.'); if (action) { res = await fetch('/generate_schedule/?approve_adjustments=true', { method: 'POST' }); data = await res.json(); } } if (res.ok) { await fetchSchedule(); alert(data.message); } else errorMessage.value = data.detail || 'Неизвестная ошибка сервера'; } catch (e) { errorMessage.value = 'Ошибка связи (Timeout).'; } isGenerating.value = false; };
+    const generationLabel = scope => ({ 1: '1-й семестр', 2: '2-й семестр', all: 'все открытые семестры' })[scope] || 'все открытые семестры';
+    const openGenerationDialog = () => { generationScope.value = 'all'; };
+    const generateScheduleAll = async () => {
+        const scope = generationScope.value || 'all';
+        if (!confirm(`Сгенерировать расписание: ${generationLabel(scope)}?\nИзменения затронут только выбранные открытые семестры.`)) return;
+        isGenerating.value = true; errorMessage.value = ''; generationScope.value = null;
+        const termQuery = scope === 'all' ? '' : `&term_number=${scope}`;
+        try {
+            let res = await fetch(`/generate_schedule/?approve_adjustments=false${termQuery}`, { method: 'POST' }); let data = await res.json();
+            if (!res.ok && data.detail && (data.detail.includes('НЕ ХВАТАЕТ') || data.detail.includes('ограничения несовместимы') || data.detail.includes('Математический тупик'))) {
+                const action = confirm(data.detail + '\n\nНажмите OK, чтобы исправить автоматически безопасным режимом (без накладок), или Отмена для ручного исправления.');
+                if (action) { res = await fetch(`/generate_schedule/?approve_adjustments=true${termQuery}`, { method: 'POST' }); data = await res.json(); }
+            }
+            if (res.ok) { await fetchSchedule(); alert(data.message); } else errorMessage.value = data.detail || 'Неизвестная ошибка сервера';
+        } catch (e) { errorMessage.value = 'Ошибка связи (Timeout).'; }
+        isGenerating.value = false;
+    };
     const exportPdf = day => {
         const scheduleDate = localDate(calendarDateForDay(day));
         window.open(`/export/schedule.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(scheduleDate)}&academic_year_id=${selectedAcademicYearId.value}`, '_blank');
@@ -195,5 +211,5 @@ createApp({ setup() {
         const scheduleDate = localDate(calendarDateForDay(day));
         window.open(`/export/teachers.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(scheduleDate)}&academic_year_id=${selectedAcademicYearId.value}`, '_blank');
     };
-    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, modalMode, form, selectedPlanId, activeCardId, curatorEdit, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, cancelCardEntry, restoreCardEntry, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generateScheduleAll, exportPdf, exportTeachersPdf, formatDayDate, isBeforeTermStart };
+    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, modalMode, form, selectedPlanId, activeCardId, curatorEdit, generationScope, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, cancelCardEntry, restoreCardEntry, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, generateScheduleAll, exportPdf, exportTeachersPdf, formatDayDate, isBeforeTermStart };
 } }).component('searchable-select', SearchableSelect).mount('#app');
