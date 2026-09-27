@@ -4,5 +4,22 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 .input-modern { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 16px; transition: all 0.2s ease; outline: none; }
 .input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
 .progress-thin { height: 4px; border-radius: 4px; }
+.progress-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(185px, 36%); gap: 24px; align-items: center; min-height: 148px; padding: 24px 26px 24px 30px; overflow: hidden; background: #fff; border: 1px solid #e2e8f0; border-radius: 18px; box-shadow: 0 10px 30px -18px rgba(15, 23, 42, .22); transition: transform .2s ease, box-shadow .2s ease; }
+.progress-card::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 5px; background: #fbbf24; }
+.progress-card--complete::before { background: #34d399; }
+.progress-card--over::before { background: #fb7185; }
+.progress-card:hover { transform: translateY(-2px); box-shadow: 0 16px 34px -18px rgba(15, 23, 42, .28); }
+.progress-card__heading { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.progress-card__subject { display: -webkit-box; overflow: hidden; min-width: 0; margin: 0; color: #0f172a; font-size: 18px; font-weight: 800; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.progress-card__group { flex: 0 0 auto; padding: 5px 8px; color: #475569; background: #f1f5f9; border-radius: 7px; font-size: 10px; font-weight: 800; line-height: 1; text-transform: uppercase; }
+.progress-card__details { display: flex; gap: 9px; align-items: center; min-width: 0; margin-top: 10px; color: #047857; font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.progress-card__teacher { overflow: hidden; color: #94a3b8; font-weight: 700; letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
+.progress-card__metric { min-width: 0; }
+.progress-card__hours { margin-bottom: 8px; font-size: 28px; font-weight: 900; letter-spacing: -.03em; line-height: 1; text-align: right; }
+.progress-card__hours span { color: #cbd5e1; font-size: 16px; }
+.progress-card__bar { height: 6px; overflow: hidden; background: #e2e8f0; border-radius: 999px; }
+.progress-card__bar > div { height: 100%; border-radius: inherit; transition: width .7s ease; }
+.progress-card__status { margin: 9px 0 0; font-size: 12px; font-weight: 800; line-height: 1.2; text-align: right; }
+@media (max-width: 640px) { .progress-card { grid-template-columns: 1fr; gap: 18px; padding: 21px 22px 20px 27px; } .progress-card__hours, .progress-card__status { text-align: left; } }
 ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
 [v-cloak] { display: none; }
