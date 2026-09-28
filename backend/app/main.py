@@ -4,9 +4,13 @@ import os
 import secrets
 import time
 import io
+import json
 from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request as UrlRequest, urlopen
 from xml.sax.saxutils import escape
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -1701,6 +1705,47 @@ def resolved_export_schedule_date(db: Session, week_number: int, day: Optional[i
         return fallback
     first_monday = year.start_date - timedelta(days=year.start_date.isoweekday() - 1)
     return first_monday + timedelta(days=(week_number - 1) * 7 + day - 1)
+
+
+def broadcast_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str) -> dict:
+    """Send an already-built schedule PDF to the isolated bot service."""
+    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
+    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
+    if not bot_url or not bot_secret:
+        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
+    query = urlencode({"audience": audience, "filename": filename})
+    request = UrlRequest(
+        f"{bot_url}/internal/broadcast-pdf?{query}",
+        data=pdf.getvalue(),
+        headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Бот не принял рассылку") from exc
+    except (URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from exc
+
+
+@app.post("/telegram/broadcast-schedule")
+def broadcast_schedule_to_telegram(
+    week_number: int = 1,
+    day: Optional[int] = None,
+    schedule_date: Optional[date] = None,
+    academic_year_id: Optional[int] = None,
+    audience: str = "student",
+    _: models.User = Depends(require_user),
+    db: Session = Depends(database.get_db),
+):
+    if audience not in {"student", "teacher"}:
+        raise HTTPException(status_code=400, detail="Выберите студентов или преподавателей")
+    schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
+    date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
+    filename = ("schedule" if audience == "student" else "teachers_schedule") + f"_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
+    pdf = build_schedule_pdf(db, week_number, day, schedule_date) if audience == "student" else build_teachers_schedule_pdf(db, week_number, day, schedule_date)
+    return broadcast_pdf_to_telegram(pdf, audience, filename)
 
 
 @app.get("/export/schedule.pdf")
