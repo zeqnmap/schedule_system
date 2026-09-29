@@ -402,6 +402,33 @@ def remove_entries_for_dates(
     return query.delete(synchronize_session=False)
 
 
+def group_has_classes_on_date(db: Session, group_id: int, academic_year_id: Optional[int], target_date: Optional[date]) -> bool:
+    """Whether an implicit common hour may exist for this group on this date."""
+    if target_date is None:
+        return True
+    if academic_year_id is None:
+        year = db.query(models.AcademicYear).filter_by(is_active=True).first()
+        academic_year_id = year.id if year else None
+    if academic_year_id is None:
+        return False
+    in_term = db.query(models.GroupTerm.id).filter(
+        models.GroupTerm.group_id == group_id,
+        models.GroupTerm.academic_year_id == academic_year_id,
+        models.GroupTerm.is_active.is_(True),
+        models.GroupTerm.start_date <= target_date,
+        models.GroupTerm.end_date >= target_date,
+    ).first()
+    if not in_term:
+        return False
+    if db.query(models.AcademicDayOff.id).filter_by(
+        academic_year_id=academic_year_id, day_date=target_date
+    ).first():
+        return False
+    return not db.query(models.GroupBreakDay.id).filter_by(
+        academic_year_id=academic_year_id, group_id=group_id, day_date=target_date
+    ).first()
+
+
 @app.get("/teacher-vacations/", response_model=List[schemas.TeacherVacationOut])
 def read_teacher_vacations(teacher_id: Optional[int] = None, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     query = db.query(models.TeacherVacation)
@@ -1200,7 +1227,7 @@ def get_schedule(group_id: Optional[int] = None, week_number: int = 1, term_id: 
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
 
 
-def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None):
+def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None):
     font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
     if not font_path:
         raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
@@ -1210,19 +1237,20 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     group_records = {group.id: group for group in db.query(models.Group).all()}
     group_numbers = {group_id: group.number for group_id, group in group_records.items()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
+    year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first() if academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
+    academic_year_id = year.id if year else academic_year_id
     curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
     curator_overrides = {
         (item.group_id, item.curator_hour_id, item.schedule_date): item
         for item in db.query(models.GroupCuratorHourOverride).all()
     }
-    common_day_off = bool(schedule_date and db.query(models.AcademicDayOff).filter_by(day_date=schedule_date).first())
-    group_break_ids = {
-        item.group_id for item in db.query(models.GroupBreakDay).filter_by(day_date=schedule_date).all()
-    } if schedule_date else set()
-    query = db.query(models.ScheduleEntry).filter(
-        models.ScheduleEntry.week_number == week_number,
-        models.ScheduleEntry.status != "canceled",
-    )
+    query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.status != "canceled")
+    if start_date and end_date:
+        query = query.filter(models.ScheduleEntry.schedule_date >= start_date, models.ScheduleEntry.schedule_date <= end_date)
+    else:
+        query = query.filter(models.ScheduleEntry.week_number == week_number)
+    if academic_year_id:
+        query = query.filter(models.ScheduleEntry.academic_year_id == academic_year_id)
     if day is not None:
         query = query.filter(models.ScheduleEntry.day_of_week == day)
     entries = query.order_by(
@@ -1232,7 +1260,14 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     ).all()
     available_days = {entry.day_of_week for entry in entries}
     available_days.update(item.day_of_week for item in curator_hours)
-    days = [day] if day else sorted(available_days) or list(range(1, 6))
+    if start_date and end_date:
+        range_dates, cursor = [], start_date
+        while cursor <= end_date:
+            if cursor.isoweekday() <= 6: range_dates.append((cursor.isoweekday(), cursor))
+            cursor += timedelta(days=1)
+        render_days = range_dates
+    else:
+        render_days = [(item, None) for item in ([day] if day else sorted(available_days) or list(range(1, 6)))]
     day_names = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА"]
     buffer = io.BytesIO()
     document = SimpleDocTemplate(
@@ -1247,8 +1282,12 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     subtitle = ParagraphStyle("PdfSubtitle", fontName="ScheduleFont", fontSize=11, leading=14, alignment=1, textColor=colors.HexColor("#475569"), spaceAfter=2)
     story = []
 
-    for index, selected_day in enumerate(days):
-        date_line = f"ДАТА: {schedule_date.strftime('%d.%m.%Y')}" if schedule_date else ""
+    for index, (selected_day, range_selected_date) in enumerate(render_days):
+        selected_date = range_selected_date or (schedule_date if day == selected_day and schedule_date else (
+            year.start_date - timedelta(days=year.start_date.isoweekday() - 1) + timedelta(days=(week_number - 1) * 7 + selected_day - 1)
+            if year else None
+        ))
+        date_line = f"ДАТА: {selected_date.strftime('%d.%m.%Y')}" if selected_date else ""
         story.extend([
             Paragraph("РАСПИСАНИЕ ЗАНЯТИЙ", title),
             Paragraph(date_line, subtitle) if date_line else Spacer(1, 1 * mm),
@@ -1256,7 +1295,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
             Spacer(1, 3 * mm),
         ])
 
-        day_entries = [entry for entry in entries if entry.day_of_week == selected_day]
+        day_entries = [entry for entry in entries if entry.day_of_week == selected_day and (not range_selected_date or entry.schedule_date == selected_date)]
         day_curators = [item for item in curator_hours if item.day_of_week == selected_day]
         specific_slots = {
             (item.group_id, item.time_slot + offset)
@@ -1267,6 +1306,8 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
         rows_by_group = {}
 
         for entry in day_entries:
+            if not group_has_classes_on_date(db, entry.group_id, academic_year_id, selected_date):
+                continue
             teacher_name = teachers.get(entry.teacher_id, "Не назначен")
             if entry.teacher2_id:
                 teacher_name += f" / {teachers.get(entry.teacher2_id, '')}"
@@ -1280,9 +1321,9 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
         for item in day_curators:
             target_groups = [item.group_id] if item.group_id not in (0, None) else [group_id for group_id in group_numbers if (group_id, item.time_slot) not in specific_slots]
             for group_id in target_groups:
-                if common_day_off or group_id in group_break_ids:
+                if not group_has_classes_on_date(db, group_id, academic_year_id, selected_date):
                     continue
-                override = curator_overrides.get((group_id, item.id, schedule_date)) if schedule_date else None
+                override = curator_overrides.get((group_id, item.id, selected_date)) if selected_date else None
                 if override and override.is_hidden:
                     continue
                 slot_label = str(item.time_slot) if item.duration == 1 else f"{item.time_slot}-{item.time_slot + item.duration - 1}"
@@ -1338,7 +1379,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
             style.append(("TEXTCOLOR", (2, row), (2, row), colors.HexColor("#b45309")))
         table.setStyle(TableStyle(style))
         story.append(table)
-        if index < len(days) - 1:
+        if index < len(render_days) - 1:
             story.append(PageBreak())
 
     document.build(story)
@@ -1346,7 +1387,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     return buffer
 
 
-def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None):
+def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None):
     font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
     if not font_path:
         raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
@@ -1356,25 +1397,33 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
     group_records = {group.id: group for group in db.query(models.Group).all()}
     groups = {group_id: group.number for group_id, group in group_records.items()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
+    year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first() if academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
+    academic_year_id = year.id if year else academic_year_id
     curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
     curator_overrides = {
         (item.group_id, item.curator_hour_id, item.schedule_date): item
         for item in db.query(models.GroupCuratorHourOverride).all()
     }
-    common_day_off = bool(schedule_date and db.query(models.AcademicDayOff).filter_by(day_date=schedule_date).first())
-    group_break_ids = {
-        item.group_id for item in db.query(models.GroupBreakDay).filter_by(day_date=schedule_date).all()
-    } if schedule_date else set()
-    query = db.query(models.ScheduleEntry).filter(
-        models.ScheduleEntry.week_number == week_number,
-        models.ScheduleEntry.status != "canceled",
-    )
+    query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.status != "canceled")
+    if start_date and end_date:
+        query = query.filter(models.ScheduleEntry.schedule_date >= start_date, models.ScheduleEntry.schedule_date <= end_date)
+    else:
+        query = query.filter(models.ScheduleEntry.week_number == week_number)
+    if academic_year_id:
+        query = query.filter(models.ScheduleEntry.academic_year_id == academic_year_id)
     if day is not None:
         query = query.filter(models.ScheduleEntry.day_of_week == day)
     entries = query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
     available_days = {entry.day_of_week for entry in entries}
     available_days.update(item.day_of_week for item in curator_hours)
-    days = [day] if day else sorted(available_days) or list(range(1, 6))
+    if start_date and end_date:
+        range_dates, cursor = [], start_date
+        while cursor <= end_date:
+            if cursor.isoweekday() <= 6: range_dates.append((cursor.isoweekday(), cursor))
+            cursor += timedelta(days=1)
+        render_days = range_dates
+    else:
+        render_days = [(item, None) for item in ([day] if day else sorted(available_days) or list(range(1, 6)))]
     day_names = ["ПОНЕДЕЛЬНИК", "ВТОРНИК", "СРЕДА", "ЧЕТВЕРГ", "ПЯТНИЦА", "СУББОТА"]
     buffer = io.BytesIO()
     document = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=8 * mm, rightMargin=8 * mm, topMargin=9 * mm, bottomMargin=9 * mm)
@@ -1382,8 +1431,12 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
     subtitle = ParagraphStyle("TeachersPdfSubtitle", fontName="ScheduleFont", fontSize=11, leading=14, alignment=1, textColor=colors.HexColor("#475569"), spaceAfter=2)
     story = []
 
-    for index, selected_day in enumerate(days):
-        date_line = f"ДАТА: {schedule_date.strftime('%d.%m.%Y')}" if schedule_date else ""
+    for index, (selected_day, range_selected_date) in enumerate(render_days):
+        selected_date = range_selected_date or (schedule_date if day == selected_day and schedule_date else (
+            year.start_date - timedelta(days=year.start_date.isoweekday() - 1) + timedelta(days=(week_number - 1) * 7 + selected_day - 1)
+            if year else None
+        ))
+        date_line = f"ДАТА: {selected_date.strftime('%d.%m.%Y')}" if selected_date else ""
         story.extend([
             Paragraph("РАСПИСАНИЕ ПРЕПОДАВАТЕЛЕЙ", title),
             Paragraph(date_line, subtitle) if date_line else Spacer(1, 1 * mm),
@@ -1393,7 +1446,9 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
         # Timetable grid: teachers form the rows, lesson numbers form the columns.
         # Paragraphs deliberately wrap full subject names instead of abbreviating them.
         rows_by_teacher = {}
-        for entry in (entry for entry in entries if entry.day_of_week == selected_day):
+        for entry in (entry for entry in entries if entry.day_of_week == selected_day and (not range_selected_date or entry.schedule_date == selected_date)):
+            if not group_has_classes_on_date(db, entry.group_id, academic_year_id, selected_date):
+                continue
             for teacher_id in {teacher_id for teacher_id in (entry.teacher_id, entry.teacher2_id) if teacher_id}:
                 rows_by_teacher.setdefault(teacher_id, {})[entry.time_slot] = {
                     "subject": entry.subject_name or "—",
@@ -1404,9 +1459,9 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
         for item in (item for item in curator_hours if item.day_of_week == selected_day):
             target_groups = [item.group_id] if item.group_id not in (0, None) else list(groups)
             for group_id in target_groups:
-                if common_day_off or group_id in group_break_ids:
+                if not group_has_classes_on_date(db, group_id, academic_year_id, selected_date):
                     continue
-                override = curator_overrides.get((group_id, item.id, schedule_date)) if schedule_date else None
+                override = curator_overrides.get((group_id, item.id, selected_date)) if selected_date else None
                 if override and override.is_hidden:
                     continue
                 group = group_records.get(group_id)
@@ -1461,7 +1516,7 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
             style.append(("BACKGROUND", (0, row_index), (0, row_index), colors.HexColor("#e8f3f1") if row_index % 2 else colors.HexColor("#eef2f7")))
         table.setStyle(TableStyle(style))
         story.append(table)
-        if index < len(days) - 1:
+        if index < len(render_days) - 1:
             story.append(PageBreak())
     document.build(story)
     buffer.seek(0)
@@ -1707,13 +1762,13 @@ def resolved_export_schedule_date(db: Session, week_number: int, day: Optional[i
     return first_monday + timedelta(days=(week_number - 1) * 7 + day - 1)
 
 
-def broadcast_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str) -> dict:
+def broadcast_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, caption: str) -> dict:
     """Send an already-built schedule PDF to the isolated bot service."""
     bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
     bot_secret = os.getenv("BOT_SHARED_SECRET", "")
     if not bot_url or not bot_secret:
         raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
-    query = urlencode({"audience": audience, "filename": filename})
+    query = urlencode({"audience": audience, "filename": filename, "caption": caption})
     request = UrlRequest(
         f"{bot_url}/internal/broadcast-pdf?{query}",
         data=pdf.getvalue(),
@@ -1734,6 +1789,8 @@ def broadcast_schedule_to_telegram(
     week_number: int = 1,
     day: Optional[int] = None,
     schedule_date: Optional[date] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     academic_year_id: Optional[int] = None,
     audience: str = "student",
     _: models.User = Depends(require_user),
@@ -1741,27 +1798,38 @@ def broadcast_schedule_to_telegram(
 ):
     if audience not in {"student", "teacher"}:
         raise HTTPException(status_code=400, detail="Выберите студентов или преподавателей")
-    schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
-    date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
-    filename = ("schedule" if audience == "student" else "teachers_schedule") + f"_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
-    pdf = build_schedule_pdf(db, week_number, day, schedule_date) if audience == "student" else build_teachers_schedule_pdf(db, week_number, day, schedule_date)
-    return broadcast_pdf_to_telegram(pdf, audience, filename)
+    if not (start_date and end_date):
+        schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
+    year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first() if academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
+    week_start = None
+    if year:
+        first_monday = year.start_date - timedelta(days=year.start_date.isoweekday() - 1)
+        week_start = first_monday + timedelta(days=(week_number - 1) * 7)
+    filename = "Расписание.pdf" if audience == "student" else "Расписание преподавателей.pdf"
+    if start_date and end_date:
+        caption = f"Расписание на период: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}"
+    elif day and schedule_date:
+        caption = f"Расписание на {schedule_date.strftime('%d.%m.%Y')}"
+    elif week_start:
+        caption = f"Расписание на неделю: {week_start.strftime('%d.%m.%Y')} - {(week_start + timedelta(days=5)).strftime('%d.%m.%Y')}"
+    else:
+        caption = f"Расписание на неделю № {week_number}"
+    pdf = build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date) if audience == "student" else build_teachers_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date)
+    return broadcast_pdf_to_telegram(pdf, audience, filename, caption)
 
 
 @app.get("/export/schedule.pdf")
-def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
-    schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
-    date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
-    filename = f"schedule_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
-    return StreamingResponse(build_schedule_pdf(db, week_number, day, schedule_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    if not (start_date and end_date): schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
+    filename = f"schedule_{start_date.isoformat()}_{end_date.isoformat()}" if start_date and end_date else f"schedule_week_{week_number}_{schedule_date.isoformat() if schedule_date else ''}" + (f"_day_{day}" if day else "")
+    return StreamingResponse(build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'})
 
 
 @app.get("/export/teachers.pdf")
-def export_teachers_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
-    schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
-    date_suffix = f"_{schedule_date.isoformat()}" if schedule_date else ""
-    filename = f"teachers_schedule_week_{week_number}{date_suffix}" + (f"_day_{day}" if day else "") + ".pdf"
-    return StreamingResponse(build_teachers_schedule_pdf(db, week_number, day, schedule_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+def export_teachers_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    if not (start_date and end_date): schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
+    filename = f"teachers_schedule_{start_date.isoformat()}_{end_date.isoformat()}" if start_date and end_date else f"teachers_schedule_week_{week_number}_{schedule_date.isoformat() if schedule_date else ''}" + (f"_day_{day}" if day else "")
+    return StreamingResponse(build_teachers_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'})
 
 
 def is_physical_education(subject_name: str) -> bool:

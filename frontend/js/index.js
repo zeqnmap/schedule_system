@@ -3,7 +3,7 @@ createApp({ setup() {
     const groups = ref([]), teachers = ref([]), rooms = ref([]), plans = ref([]), schedule = ref([]), allSchedule = ref([]), curatorHours = ref([]), curatorOverrides = ref([]), daysOff = ref([]), groupBreakDays = ref([]), terms = ref([]), academicYears = ref([]);
     const selectedAcademicYearId = ref(Number(localStorage.getItem('edusync-academic-year-id')) || null);
     const selectedGroupId = ref(null), selectedTermId = ref(null), selectedWeek = ref(1), selectedDate = ref(''), isArchived = ref(false), isArchivedAll = ref(false), isGenerating = ref(false);
-    const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), activeCardId = ref(null), curatorEdit = ref(null), generationScope = ref(null), errorMessage = ref('');
+    const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), activeCardId = ref(null), curatorEdit = ref(null), generationScope = ref(null), scheduleAction = ref(null), scheduleActionMonth = ref(''), errorMessage = ref('');
     let scheduleRequestId = 0;
     let archiveRequestId = 0;
     const currentGroup = computed(() => groups.value.find(gr => Number(gr.id) === Number(selectedGroupId.value)));
@@ -211,16 +211,71 @@ createApp({ setup() {
         const scheduleDate = localDate(calendarDateForDay(day));
         window.open(`/export/teachers.pdf?week_number=${selectedWeek.value}&day=${day}&schedule_date=${encodeURIComponent(scheduleDate)}&academic_year_id=${selectedAcademicYearId.value}`, '_blank');
     };
-    const broadcastSchedule = async (day, audience) => {
+    const exportWeekPdf = audience => {
+        const endpoint = audience === 'student' ? '/export/schedule.pdf' : '/export/teachers.pdf';
+        window.open(`${endpoint}?week_number=${selectedWeek.value}&academic_year_id=${selectedAcademicYearId.value}`, '_blank');
+    };
+    const scheduleActionMonthDate = computed(() => new Date(`${scheduleActionMonth.value || currentAcademicYear.value?.start_date?.slice(0, 7) || '2026-09'}-01T00:00:00`));
+    const scheduleActionMonthTitle = computed(() => scheduleActionMonthDate.value.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }));
+    const scheduleActionCalendarDays = computed(() => {
+        const month = scheduleActionMonthDate.value, first = new Date(month.getFullYear(), month.getMonth(), 1);
+        const offset = (first.getDay() + 6) % 7, count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate(), year = currentAcademicYear.value;
+        return Array.from({ length: offset + count }, (_, index) => {
+            if (index < offset) return null;
+            const value = localDate(new Date(month.getFullYear(), month.getMonth(), index - offset + 1)), range = scheduleAction.value || {};
+            const sunday = new Date(`${value}T00:00:00`).getDay() === 0;
+            return { value, number: Number(value.slice(-2)), outside: !year || value < year.start_date || value > year.end_date, sunday, selected: value === range.start_date || value === range.end_date, between: Boolean(range.start_date && range.end_date && value > range.start_date && value < range.end_date) };
+        });
+    });
+    const selectScheduleActionDate = day => {
+        if (!day || day.outside || day.sunday || !scheduleAction.value) return;
+        const range = scheduleAction.value;
+        if (!range.start_date || range.end_date) scheduleAction.value = { ...range, day: null, start_date: day.value, end_date: '' };
+        else if (day.value >= range.start_date) scheduleAction.value = { ...range, end_date: day.value };
+        else scheduleAction.value = { ...range, start_date: day.value, end_date: range.start_date };
+    };
+    const previousScheduleActionMonth = () => { const value = scheduleActionMonthDate.value; scheduleActionMonth.value = localDate(new Date(value.getFullYear(), value.getMonth() - 1, 1)).slice(0, 7); };
+    const nextScheduleActionMonth = () => { const value = scheduleActionMonthDate.value; scheduleActionMonth.value = localDate(new Date(value.getFullYear(), value.getMonth() + 1, 1)).slice(0, 7); };
+    const openScheduleActions = (day, audience) => { const date = day ? localDate(calendarDateForDay(day)) : ''; scheduleActionMonth.value = (date || currentAcademicYear.value?.start_date || '').slice(0, 7); scheduleAction.value = { day, audience, dayPicker: day === null, start_date: date, end_date: date }; };
+    const selectScheduleActionDay = day => { if (scheduleAction.value) scheduleAction.value = { ...scheduleAction.value, day }; };
+    const downloadScheduleAction = () => {
+        const action = scheduleAction.value;
+        if (!action) return;
+        scheduleAction.value = null;
+        if (action.start_date && action.end_date && action.start_date !== action.end_date) {
+            const endpoint = action.audience === 'student' ? '/export/schedule.pdf' : '/export/teachers.pdf';
+            const params = new URLSearchParams({ week_number: String(weekForDate(action.start_date)), start_date: action.start_date, end_date: action.end_date, academic_year_id: String(selectedAcademicYearId.value) });
+            window.open(`${endpoint}?${params}`, '_blank');
+            return;
+        }
+        if (!action.day && action.start_date && action.end_date) {
+            const selected = new Date(`${action.start_date}T00:00:00`), selectedDay = selected.getDay() || 7;
+            const endpoint = action.audience === 'student' ? '/export/schedule.pdf' : '/export/teachers.pdf';
+            const params = new URLSearchParams({ week_number: String(weekForDate(action.start_date)), day: String(selectedDay), schedule_date: action.start_date, academic_year_id: String(selectedAcademicYearId.value) });
+            window.open(`${endpoint}?${params}`, '_blank');
+            return;
+        }
+        if (!action.day) { exportWeekPdf(action.audience); return; }
+        if (action.audience === 'student') exportPdf(action.day); else exportTeachersPdf(action.day);
+    };
+    const broadcastScheduleAction = async () => {
+        const action = scheduleAction.value;
+        if (!action) return;
+        scheduleAction.value = null;
+        await broadcastSchedule(action.day, action.audience, action.start_date, action.end_date);
+    };
+    const broadcastSchedule = async (day, audience, startDate = '', endDate = '') => {
         const target = audience === 'student' ? 'студентам' : 'преподавателям';
-        const period = day ? `${getDayName(day).toLowerCase()}, ${formatDayDate(day)}` : 'всю неделю';
+        const period = startDate && endDate && startDate !== endDate ? `${startDate.split('-').reverse().join('.')} — ${endDate.split('-').reverse().join('.')}` : (day ? `${getDayName(day).toLowerCase()}, ${formatDayDate(day)}` : 'всю неделю');
         if (!confirm(`Отправить PDF расписания ${target} за ${period}?`)) return;
-        const params = new URLSearchParams({ week_number: selectedWeek.value, academic_year_id: selectedAcademicYearId.value, audience });
+        const params = new URLSearchParams({ week_number: startDate ? weekForDate(startDate) : selectedWeek.value, academic_year_id: selectedAcademicYearId.value, audience });
+        if (startDate && endDate && startDate !== endDate) { params.set('start_date', startDate); params.set('end_date', endDate); }
+        else if (!day && startDate && endDate) { const selected = new Date(`${startDate}T00:00:00`), selectedDay = selected.getDay() || 7; params.set('day', selectedDay); params.set('schedule_date', startDate); }
         if (day) { params.set('day', day); params.set('schedule_date', localDate(calendarDateForDay(day))); }
         const response = await fetch(`/telegram/broadcast-schedule?${params}`, { method: 'POST' });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) { errorMessage.value = data.detail || 'Не удалось отправить PDF в Telegram'; return; }
         alert(`Рассылка завершена: отправлено ${data.delivered}, ошибок ${data.failed}.`);
     };
-    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, modalMode, form, selectedPlanId, activeCardId, curatorEdit, generationScope, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, cancelCardEntry, restoreCardEntry, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, generateScheduleAll, exportPdf, exportTeachersPdf, broadcastSchedule, formatDayDate, isBeforeTermStart };
+    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, modalMode, form, selectedPlanId, activeCardId, curatorEdit, generationScope, scheduleAction, scheduleActionMonthTitle, scheduleActionCalendarDays, scheduleActionMonth, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTeachers, availableTeachers2, availableRooms, getDayName, getTeacherName, getTeacherNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, cancelCardEntry, restoreCardEntry, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, generateScheduleAll, exportPdf, exportTeachersPdf, openScheduleActions, selectScheduleActionDay, selectScheduleActionDate, previousScheduleActionMonth, nextScheduleActionMonth, downloadScheduleAction, broadcastScheduleAction, broadcastSchedule, formatDayDate, isBeforeTermStart };
 } }).component('searchable-select', SearchableSelect).mount('#app');

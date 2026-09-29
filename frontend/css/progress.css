@@ -21,5 +21,12 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 .progress-card__bar > div { height: 100%; border-radius: inherit; transition: width .7s ease; }
 .progress-card__status { margin: 9px 0 0; font-size: 12px; font-weight: 800; line-height: 1.2; text-align: right; }
 @media (max-width: 640px) { .progress-card { grid-template-columns: 1fr; gap: 18px; padding: 21px 22px 20px 27px; } .progress-card__hours, .progress-card__status { text-align: left; } }
+body.dark-theme .progress-card { background: #242424; border-color: rgba(255,255,255,.1); box-shadow: 0 16px 34px -18px rgba(0,0,0,.68); }
+body.dark-theme .progress-card__subject { color: #f1f5f9; }
+body.dark-theme .progress-card__group { color: #cbd5e1; background: #303030; }
+body.dark-theme .progress-card__teacher { color: #a8a8a8; }
+body.dark-theme .progress-card__hours span { color: #737373; }
+body.dark-theme .progress-card__bar { background: #3a3a3a; }
+body.dark-theme .progress-card__hours.text-slate-900 { color: #f1f5f9 !important; }
 ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
 [v-cloak] { display: none; }

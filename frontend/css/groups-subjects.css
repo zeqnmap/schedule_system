@@ -16,5 +16,16 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 .btn-emerald:hover { box-shadow: 0 12px 32px -6px rgba(16, 185, 129, 0.5); transform: translateY(-2px); }
 .btn-coral { background-color: #FFF1F2; color: #E11D48; transition: all 0.2s ease; cursor: pointer; border: 1px solid transparent; }
 .btn-coral:hover { background-color: #FFE4E6; color: #BE123C; border-color: #FECDD3; }
+body.dark-theme .semester-panel { background: #1d1d1d; border-color: #454545; }
+body.dark-theme .semester-item { background: #303030; border-color: #454545; }
+body.dark-theme .semester-item strong { color: #f1f5f9; }
+body.dark-theme .semester-item p { color: #a8a8a8; }
+body.dark-theme .semester-lock { color: #6ee7b7; background: #173d32; }
+body.dark-theme .semester-locked, body.dark-theme .semester-edit { color: #d4d4d4; background: #3a3a3a; }
+body.dark-theme .semester-edit:hover { background: #454545; }
+body.dark-theme .semester-editor { background: #173d32; border-color: #296a54; }
+body.dark-theme .semester-editor strong { color: #a7f3d0; }
+body.dark-theme .semester-editor label, body.dark-theme .semester-editor button:not(.btn-emerald), body.dark-theme .semester-editor input[readonly] { color: #d4d4d4; }
+body.dark-theme .semester-editor input[readonly] { background: #1d1d1d; }
 ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; } ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 [v-cloak] { display: none; }

@@ -6,15 +6,15 @@
     <title>Аналитика | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link rel="stylesheet" href="../css/app-shell.css">
+    <link rel="stylesheet" href="../css/app-shell.css?v=20260933">
     <link rel="stylesheet" href="../css/progress.css">
     <script src="../js/auth.js" defer></script>
-    <script src="../js/app-nav.js" defer></script>
+    <script src="../js/app-nav.js?v=20260933" defer></script>
     <script src="../js/searchable-select.js"></script>
     <script src="../js/progress.js" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
-<body class="text-slate-800 antialiased min-h-screen">
+<body class="page-progress text-slate-800 antialiased min-h-screen">
 
     <nav class="fixed inset-x-0 top-0 z-50 bg-white/70 backdrop-blur-2xl border-b border-slate-200">
         <div class="max-w-[1600px] mx-auto px-6 lg:px-10 h-20 flex items-center justify-between">
@@ -32,12 +32,13 @@
         </div>
     </nav>
 
-    <div id="app" v-cloak class="max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
+    <main id="app" v-cloak class="page-shell max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
 
-        <header class="flex flex-col md:flex-row justify-between items-start md:items-end mb-12">
+        <header class="page-hero page-hero--with-actions flex flex-col md:flex-row justify-between items-start md:items-end">
             <div>
-                <h1 class="text-4xl lg:text-5xl font-black text-slate-900 tracking-tight leading-tight mb-2">Аналитика часов</h1>
-                <p class="text-lg lg:text-xl text-slate-500 font-medium">Контроль соответствия расписания учебным планам</p>
+                <p class="page-eyebrow">Контроль нагрузки</p>
+                <h1 class="page-title">Аналитика часов</h1>
+                <p class="page-subtitle">Контроль соответствия расписания учебным планам</p>
             </div>
             <div class="mt-6 md:mt-0 flex flex-wrap items-center gap-3 w-full md:w-auto md:max-w-[900px]">
                 <searchable-select v-model="selectedGroupId" :options="groups" option-label="number"
@@ -80,7 +81,7 @@
             Учебные планы не найдены.
         </div>
 
-    </div>
+    </main>
 
 </body>
 </html>

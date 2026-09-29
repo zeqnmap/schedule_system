@@ -181,12 +181,24 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
             models.GroupCuratorHourOverride.group_id.in_([group.id for group in groups])
         ).all()
     }
+    days_off = {(item.academic_year_id, item.day_date) for item in db.query(models.AcademicDayOff).all()}
+    group_breaks = {(item.group_id, item.academic_year_id, item.day_date) for item in db.query(models.GroupBreakDay).all()}
     blocked, curator_teacher_slots, curator_room_slots = set(), set(), set()
     # Common settings stay unchanged; a manual group override only changes this
     # group's card and the resources reserved by that particular card.
     for group in groups:
         for item in curator_hours:
             occurrence_date = calendar_date_for_slot(year_by_group[group.id], week, item.day_of_week - 1)
+            term = terms_by_group[group.id]
+            if (
+                not term.start_date
+                or not term.end_date
+                or occurrence_date < term.start_date
+                or occurrence_date > term.end_date
+                or (year_by_group[group.id].id, occurrence_date) in days_off
+                or (group.id, year_by_group[group.id].id, occurrence_date) in group_breaks
+            ):
+                continue
             override = overrides.get((group.id, item.id, occurrence_date))
             if override and override.is_hidden:
                 continue
@@ -203,8 +215,6 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
     model = cp_model.CpModel()
     lesson, pair, single, pair_starts = {}, {}, {}, {}
     objective = []
-    days_off = {(item.academic_year_id, item.day_date) for item in db.query(models.AcademicDayOff).all()}
-    group_breaks = {(item.group_id, item.academic_year_id, item.day_date) for item in db.query(models.GroupBreakDay).all()}
     vacations = db.query(models.TeacherVacation).all()
 
     def date_available(group, day_index):

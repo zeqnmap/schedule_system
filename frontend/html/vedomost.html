@@ -6,20 +6,20 @@
     <title>Ведомость | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link rel="stylesheet" href="../css/app-shell.css">
+    <link rel="stylesheet" href="../css/app-shell.css?v=20260933">
     <link rel="stylesheet" href="../css/vedomost.css">
     <script src="../js/auth.js" defer></script>
-    <script src="../js/app-nav.js" defer></script>
+    <script src="../js/app-nav.js?v=20260933" defer></script>
     <script src="../js/vedomost.js" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
-<body class="text-slate-800 antialiased min-h-screen">
+<body class="page-vedomost text-slate-800 antialiased min-h-screen">
     <nav></nav>
-    <main id="app" v-cloak class="max-w-[1180px] mx-auto px-6 lg:px-10 pt-32 pb-16">
-        <header class="mb-10">
-            <p class="text-xs font-black uppercase tracking-[.18em] text-emerald-600">Учёт проведённых занятий</p>
-            <h1 class="mt-2 text-4xl lg:text-5xl font-black text-slate-900 tracking-tight">Ведомость часов</h1>
-            <p class="mt-3 text-lg text-slate-500 font-medium">Экспорт проведённых занятий группы за выбранный календарный период.</p>
+    <main id="app" v-cloak class="page-shell max-w-[1180px] mx-auto px-6 lg:px-10 pt-32 pb-16">
+        <header class="page-hero">
+            <p class="page-eyebrow">Учёт проведённых занятий</p>
+            <h1 class="page-title">Ведомость часов</h1>
+            <p class="page-subtitle">Экспорт проведённых занятий группы за выбранный календарный период.</p>
         </header>
 
         <section class="bento-card p-7 lg:p-9">

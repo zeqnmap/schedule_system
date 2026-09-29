@@ -1,4 +1,22 @@
 body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
+.schedule-action-panel { background: #e2e8f0; }
+.schedule-action-button { min-height: 84px; }
+.schedule-action-download { background: #fff; border-color: #cbd5e1; }
+.schedule-action-download:hover { border-color: #9bd8f2; background: #f1faff; }
+.schedule-action-telegram { background: #229ed9; }
+.schedule-action-telegram:hover { background: #168ac0; }
+body.dark-theme .schedule-action-panel { background: #303030 !important; }
+body.dark-theme .schedule-action-download { background: #3a3a3a !important; border-color: rgba(255,255,255,.12) !important; }
+body.dark-theme .schedule-action-download:hover { background: #454545 !important; border-color: #229ed9 !important; }
+.schedule-action-calendar-day { min-height: 34px; display: grid; place-items: center; border: 1px solid #e2e8f0; border-radius: 9px; color: #334155; font-size: 12px; font-weight: 800; transition: .15s ease; }
+.schedule-action-calendar-day:hover:not(:disabled) { border-color: #10b981; color: #047857; }
+.schedule-action-calendar-day.is-selected { background: #059669; border-color: #059669; color: #fff; }
+.schedule-action-calendar-day.is-between { background: #d1fae5; border-color: #a7f3d0; color: #047857; }
+.schedule-action-calendar-day.is-disabled { cursor: default; opacity: .35; }
+body.dark-theme .schedule-action-calendar { background: #202020 !important; border-color: rgba(52,211,153,.35) !important; }
+body.dark-theme .schedule-action-calendar-day { border-color: #454545; color: #e5e7eb; background: #1d1d1d; }
+body.dark-theme .schedule-action-calendar-day.is-between { background: #173d32; border-color: #296a54; color: #a7f3d0; }
+body.dark-theme .schedule-action-calendar-day.is-selected { background: #059669; border-color: #059669; color: #fff; }
 .bento-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 28px; box-shadow: 0 10px 40px -10px rgba(0,0,0,0.04); }
 .input-modern { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 16px; transition: all 0.2s ease; outline: none; }
 .input-modern:focus { background-color: #FFFFFF; border-color: #10B981; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }

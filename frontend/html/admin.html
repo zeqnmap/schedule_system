@@ -6,15 +6,15 @@
     <title>Учебные планы | EduSync 2026</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link rel="stylesheet" href="../css/app-shell.css">
+    <link rel="stylesheet" href="../css/app-shell.css?v=20260933">
     <link rel="stylesheet" href="../css/admin.css">
     <script src="../js/auth.js" defer></script>
-    <script src="../js/app-nav.js" defer></script>
+    <script src="../js/app-nav.js?v=20260933" defer></script>
     <script src="../js/searchable-select.js"></script>
     <script src="../js/admin.js" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
-<body class="text-slate-800 antialiased min-h-screen">
+<body class="page-plans text-slate-800 antialiased min-h-screen">
 
     <nav class="fixed inset-x-0 top-0 z-50 bg-white/70 backdrop-blur-2xl border-b border-slate-200">
         <div class="max-w-[1600px] mx-auto px-6 lg:px-10 h-20 flex items-center justify-between">
@@ -32,11 +32,12 @@
         </div>
     </nav>
 
-    <div id="app" v-cloak class="max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
+    <main id="app" v-cloak class="page-shell max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
 
-        <header class="mb-12">
-            <h1 class="text-4xl lg:text-5xl font-black text-slate-900 tracking-tight leading-tight mb-2">Учебные планы</h1>
-            <p class="text-lg lg:text-xl text-slate-500 font-medium">Связывание групп, предметов, семестровых и недельных часов</p>
+        <header class="page-hero">
+            <p class="page-eyebrow">Учебные планы</p>
+            <h1 class="page-title">Учебные планы</h1>
+            <p class="page-subtitle">Связывание групп, предметов, семестровых и недельных часов</p>
         </header>
 
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
@@ -152,7 +153,7 @@
             </div>
         </Transition>
 
-    </div>
+    </main>
 
 </body>
 </html>
