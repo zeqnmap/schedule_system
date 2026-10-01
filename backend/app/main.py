@@ -5,6 +5,9 @@ import secrets
 import time
 import io
 import json
+import logging
+import queue
+import threading
 from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Optional
@@ -106,6 +109,18 @@ with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN academic_year_id INTEGER"))
     if "academic_year_id" not in archive_columns:
         connection.execute(text("ALTER TABLE archived_weeks ADD COLUMN academic_year_id INTEGER"))
+    if "teacher_hours" not in plan_columns:
+        connection.execute(text("ALTER TABLE course_plans ADD COLUMN teacher_hours INTEGER"))
+    if "teacher2_hours" not in plan_columns:
+        connection.execute(text("ALTER TABLE course_plans ADD COLUMN teacher2_hours INTEGER"))
+    if "room_name" not in plan_columns:
+        connection.execute(text("ALTER TABLE course_plans ADD COLUMN room_name VARCHAR"))
+    if "room2_name" not in plan_columns:
+        connection.execute(text("ALTER TABLE course_plans ADD COLUMN room2_name VARCHAR"))
+    if "room2_name" not in schedule_columns:
+        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN room2_name VARCHAR"))
+    if "is_generated" not in schedule_columns:
+        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN is_generated BOOLEAN DEFAULT 0 NOT NULL"))
     if "schedule_date" not in schedule_columns:
         connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN schedule_date DATE"))
     connection.execute(text("UPDATE group_terms SET start_date = COALESCE(start_date, '2026-09-01'), end_date = COALESCE(end_date, date('2026-09-01', '+' || (start_week + weeks - 2) || ' days'))"))
@@ -691,6 +706,23 @@ def read_groups(skip: int = 0, limit: int = 100, db: Session = Depends(database.
     return db.query(models.Group).offset(skip).limit(limit).all()
 
 
+@app.post("/groups/schedule-settings/", response_model=List[schemas.GroupOut])
+def update_group_schedule_settings(settings: List[schemas.GroupScheduleSetting], db: Session = Depends(database.get_db)):
+    ids = [setting.group_id for setting in settings]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(status_code=400, detail="Группа указана несколько раз")
+    groups = db.query(models.Group).filter(models.Group.id.in_(ids)).all()
+    by_id = {group.id: group for group in groups}
+    if len(by_id) != len(ids):
+        raise HTTPException(status_code=404, detail="Одна из групп не найдена")
+    for setting in settings:
+        group = by_id[setting.group_id]
+        group.weekly_hours = setting.weekly_hours
+        group.has_saturday = setting.has_saturday
+    db.commit()
+    return [by_id[group_id] for group_id in ids]
+
+
 @app.put("/groups/{group_id}", response_model=schemas.GroupOut)
 def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = Depends(database.get_db)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
@@ -700,6 +732,7 @@ def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = D
     group.number = group_data.number
     group.course = group_data.course
     group.has_saturday = group_data.has_saturday
+    group.weekly_hours = max(1, min(54, int(group_data.weekly_hours)))
     group.semester_weeks = group_data.semester_weeks
     group.curator_teacher_id = group_data.curator_teacher_id
     group.curator_room_name = group_data.curator_room_name
@@ -787,7 +820,7 @@ def toggle_group_saturday(group_id: int, db: Session = Depends(database.get_db))
 @app.post("/groups/{group_id}/set-weekly-hours")
 def set_group_weekly_hours(group_id: int, payload: dict, db: Session = Depends(database.get_db)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
-    group.weekly_hours = max(2, int(payload.get("weekly_hours", 30)))
+    group.weekly_hours = max(1, min(54, int(payload.get("weekly_hours", 30))))
     db.commit()
     db.refresh(group)
     return group
@@ -915,7 +948,7 @@ def create_course_plan(plan: schemas.CoursePlanCreate, db: Session = Depends(dat
 
 
 @app.get("/course_plans/", response_model=List[schemas.CoursePlanOut])
-def read_course_plans(skip: int = 0, limit: int = 100, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+def read_course_plans(skip: int = 0, limit: int = 1000, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     query = db.query(models.CoursePlan)
     if academic_year_id: query = query.filter(models.CoursePlan.academic_year_id == academic_year_id)
     return query.offset(skip).limit(limit).all()
@@ -932,6 +965,10 @@ def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, db: Se
     plan.group_id = plan_data.group_id
     plan.teacher_id = plan_data.teacher_id
     plan.teacher2_id = plan_data.teacher2_id
+    plan.teacher_hours = plan_data.teacher_hours
+    plan.teacher2_hours = plan_data.teacher2_hours
+    plan.room_name = (plan_data.room_name or "").strip() or None
+    plan.room2_name = (plan_data.room2_name or "").strip() or None
     plan.term_id = plan_data.term_id
     if plan_data.term_id:
         plan.academic_year_id = db.query(models.GroupTerm).filter_by(id=plan_data.term_id).first().academic_year_id
@@ -1207,14 +1244,64 @@ def toggle_archive_all(data: schemas.ArchivedWeekAllToggle, db: Session = Depend
     db.commit()
     return {"is_archived": target_state, "archived_count": len(group_ids) if target_state else 0, "total_groups": len(group_ids)}
 
+generation_lock = threading.Lock()
+
+
 @app.post("/generate_schedule/", response_model=schemas.GenerateResponse)
 def trigger_generation(approve_adjustments: bool = False, term_number: Optional[int] = None, db: Session = Depends(database.get_db)):
     if term_number not in (None, 1, 2):
         raise HTTPException(status_code=400, detail="Можно генерировать 1-й, 2-й либо все семестры")
-    success, msg = solver.trigger_global_generation(db, approve_adjustments=approve_adjustments, term_number=term_number)
+    if not generation_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Генерация уже выполняется")
+    try:
+        success, msg = solver.trigger_global_generation(db, approve_adjustments=approve_adjustments, term_number=term_number)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        generation_lock.release()
     if not success:
+        db.rollback()
         raise HTTPException(status_code=400, detail=msg)
     return {"status": "success", "message": msg}
+
+
+@app.post("/generate_schedule/stream")
+def stream_generation(term_number: Optional[int] = None):
+    if term_number not in (None, 1, 2):
+        raise HTTPException(status_code=400, detail="Можно генерировать 1-й, 2-й либо все семестры")
+    if not generation_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Генерация уже выполняется")
+    updates = queue.Queue()
+
+    def run_generation():
+        db = database.SessionLocal()
+        try:
+            def report(completed, total):
+                updates.put({"type": "progress", "completed": completed, "total": total})
+
+            success, message = solver.trigger_global_generation(db, term_number=term_number, progress=report)
+            if not success:
+                db.rollback()
+            updates.put({"type": "result", "ok": success, "message": message})
+        except Exception:
+            db.rollback()
+            logging.exception("Schedule generation failed")
+            updates.put({"type": "result", "ok": False, "message": "Ошибка генерации расписания"})
+        finally:
+            db.close()
+            generation_lock.release()
+
+    threading.Thread(target=run_generation, daemon=True).start()
+
+    def events():
+        while True:
+            update = updates.get()
+            yield json.dumps(update, ensure_ascii=False) + "\n"
+            if update["type"] == "result":
+                break
+
+    return StreamingResponse(events(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ----------------- РАСПИСАНИЕ И СТАТУСЫ -----------------
@@ -1978,6 +2065,7 @@ def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdat
     update_data.schedule_date = entry_calendar_date(update_data, db)
     validate_schedule_conflicts(update_data, db, exclude_entry_id=entry_id)
     for key, value in update_data.dict().items(): setattr(entry, key, value)
+    entry.is_generated = False
     db.commit()
     db.refresh(entry)
     return entry
@@ -2000,6 +2088,7 @@ def cancel_schedule_entry(entry_id: int, db: Session = Depends(database.get_db))
         raise HTTPException(status_code=404, detail="Занятие не найдено")
     ensure_week_editable(entry.group_id, entry.week_number, db)
     entry.status = "canceled"
+    entry.is_generated = False
     db.commit()
     db.refresh(entry)
     return entry
@@ -2011,6 +2100,7 @@ def restore_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)
         raise HTTPException(status_code=404, detail="Занятие не найдено")
     ensure_week_editable(entry.group_id, entry.week_number, db)
     entry.status = "planned"
+    entry.is_generated = False
     db.commit()
     db.refresh(entry)
     return entry

@@ -45,6 +45,9 @@ body.dark-theme .lesson-action-shell { background: #242424; border-color: #45454
 body.dark-theme .lesson-action-shell--replacement { background: transparent; border-color: transparent; }
 body.dark-theme .lesson-action-edit { background: #303030; color: #e5e7eb; }
 .modal-glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+body.generation-active > nav { display: none !important; }
+.generation-progress { width: min(420px, 100%); height: 12px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.22); }
+.generation-progress__fill { height: 100%; border-radius: inherit; background: #34d399; transition: width .2s ease; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .spinner { border: 4px solid rgba(255,255,255,0.3); width: 40px; height: 40px; border-radius: 50%; border-left-color: #fff; animation: spin 1s linear infinite; }

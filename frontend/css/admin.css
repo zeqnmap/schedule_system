@@ -7,5 +7,8 @@ body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
 .btn-emerald:hover { box-shadow: 0 12px 32px -6px rgba(16, 185, 129, 0.5); transform: translateY(-2px); }
 .btn-coral { background-color: #FFF1F2; color: #E11D48; transition: all 0.2s ease; cursor: pointer; border: 1px solid transparent; }
 .btn-coral:hover { background-color: #FFE4E6; color: #BE123C; border-color: #FECDD3; }
+.plan-list-filters { display: grid; flex: 1 1 0; grid-template-columns: minmax(180px, 190px) minmax(350px, 1fr); gap: 12px; min-width: 0; }
+.plan-list-filters > * { min-width: 0; }
+@media (max-width: 640px) { .plan-list-filters { grid-template-columns: 1fr; width: 100%; } }
 ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
 [v-cloak] { display: none; }

@@ -15,7 +15,15 @@ services:
       ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-now}
       SESSION_SECRET: ${SESSION_SECRET:-change-this-session-secret}
-      BOT_BROADCAST_URL: ${BOT_BROADCAST_URL:-http://host.docker.internal:8081}
+      BOT_BROADCAST_URL: ${BOT_BROADCAST_URL:-http://mgkap_schedule_bot:8081}
       BOT_SHARED_SECRET: ${BOT_SHARED_SECRET:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - schedule-bot
+
+networks:
+  schedule-bot:
+    external: true
+    name: mgkap-schedule

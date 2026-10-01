@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import date
 
@@ -35,6 +35,12 @@ class GroupOut(GroupBase):
     class Config: from_attributes = True
 
 
+class GroupScheduleSetting(BaseModel):
+    group_id: int
+    weekly_hours: int = Field(ge=1, le=54)
+    has_saturday: bool
+
+
 class TeacherBase(BaseModel):
     name: str
     room_id: Optional[int] = None
@@ -67,6 +73,10 @@ class CoursePlanBase(BaseModel):
     teacher_id: Optional[int] = None
     group_id: int
     teacher2_id: Optional[int] = None
+    teacher_hours: Optional[int] = None
+    teacher2_hours: Optional[int] = None
+    room_name: Optional[str] = None
+    room2_name: Optional[str] = None
     term_id: Optional[int] = None
     academic_year_id: Optional[int] = None
 
@@ -85,8 +95,9 @@ class ScheduleEntryBase(BaseModel):
     day_of_week: int
     time_slot: int
     room_name: str
-    teacher_id: int
+    teacher_id: Optional[int] = None
     teacher2_id: Optional[int] = None
+    room2_name: Optional[str] = None
     group_id: int
     subject_name: str
     status: str = "planned"  # <--- ДОБАВЛЕНО
@@ -109,8 +120,9 @@ class ScheduleEntryUpdate(BaseModel):
     day_of_week: int
     time_slot: int
     room_name: str
-    teacher_id: int
+    teacher_id: Optional[int] = None
     teacher2_id: Optional[int] = None
+    room2_name: Optional[str] = None
     group_id: int
     subject_name: str
     status: str = "planned"

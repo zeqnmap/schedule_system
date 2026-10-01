@@ -7,11 +7,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="../css/app-shell.css?v=20260933">
-    <link rel="stylesheet" href="../css/admin.css">
+    <link rel="stylesheet" href="../css/admin.css?v=20261001-plan-filters">
     <script src="../js/auth.js" defer></script>
     <script src="../js/app-nav.js?v=20260933" defer></script>
     <script src="../js/searchable-select.js"></script>
-    <script src="../js/admin.js" defer></script>
+    <script src="../js/admin.js?v=20261001-plan-filters" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body class="page-plans text-slate-800 antialiased min-h-screen">
@@ -34,10 +34,25 @@
 
     <main id="app" v-cloak class="page-shell max-w-[1600px] mx-auto px-6 lg:px-10 pt-32 pb-16">
 
-        <header class="page-hero">
-            <p class="page-eyebrow">Учебные планы</p>
-            <h1 class="page-title">Учебные планы</h1>
-            <p class="page-subtitle">Связывание групп, предметов, семестровых и недельных часов</p>
+        <header class="page-hero page-hero--with-actions flex flex-col md:flex-row justify-between items-start md:items-end">
+            <div>
+                <p class="page-eyebrow">Учебные планы</p>
+                <h1 class="page-title">Учебные планы</h1>
+                <p class="page-subtitle">Связывание групп, предметов, семестровых и недельных часов</p>
+            </div>
+            <div class="mt-6 md:mt-0 flex flex-wrap items-center gap-3 w-full md:w-auto md:max-w-[900px]">
+                <div class="plan-list-filters">
+                    <input v-model="filterGroupSearch" type="search" placeholder="Найти группу..." autocomplete="off" class="input-modern px-4 py-2.5 text-slate-700 font-semibold text-sm shadow-sm">
+                    <select v-model.number="selectedGroupId" class="input-modern px-5 py-3.5 text-slate-900 font-bold text-lg cursor-pointer shadow-sm">
+                        <option :value="null">Все группы</option>
+                        <option v-for="group in filteredGroups" :key="group.id" :value="group.id">Группа {{ group.number }}</option>
+                    </select>
+                </div>
+                <select v-model.number="selectedTermId" :disabled="!selectedGroupId" class="input-modern px-5 py-3.5 text-slate-900 font-bold text-lg cursor-pointer w-full md:w-52 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <option :value="null">{{ selectedGroupId ? 'Все семестры' : 'Сначала группа' }}</option>
+                    <option v-for="term in availableFilterTerms" :key="term.id" :value="term.id">{{ term.name }}</option>
+                </select>
+            </div>
         </header>
 
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-8">
@@ -90,6 +105,17 @@
                             placeholder="Нет" search-placeholder="Найти преподавателя..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
                     </div>
 
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет</label>
+                            <searchable-select v-model="form.room_name" :options="rooms" option-label="name" option-value="name" placeholder="Без кабинета" search-placeholder="Найти кабинет..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Второй кабинет</label>
+                            <searchable-select v-model="form.room2_name" :options="rooms" option-label="name" option-value="name" placeholder="Нет" search-placeholder="Найти кабинет..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
+                        </div>
+                    </div>
+
                     <div class="flex gap-3 pt-4">
                         <button type="submit" class="flex-1 btn-emerald font-extrabold text-base py-4 rounded-2xl">
                             {{ editingPlanId ? 'Сохранить изменения' : 'Связать и добавить' }}
@@ -104,11 +130,11 @@
             <div class="xl:col-span-8 bento-card p-8 lg:p-10">
                 <div class="flex justify-between items-center mb-8 border-b border-slate-100 pb-5">
                     <h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Назначенные дисциплины</h2>
-                    <span class="bg-slate-100 text-slate-600 font-bold text-xs px-4 py-2 rounded-xl">Записей: {{ plans.length }}</span>
+                    <span class="bg-slate-100 text-slate-600 font-bold text-xs px-4 py-2 rounded-xl">Записей: {{ filteredPlans.length }}</span>
                 </div>
 
                 <div class="space-y-4 overflow-y-auto max-h-[800px] pr-3">
-                    <div v-for="p in plans" :key="p.id" class="group flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 hover:shadow-md transition-all">
+                    <div v-for="p in filteredPlans" :key="p.id" class="group flex flex-col sm:flex-row justify-between items-start sm:items-center gap-5 p-6 rounded-3xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 hover:shadow-md transition-all">
 
                         <div>
                             <div class="flex items-center gap-3 mb-2">
@@ -121,7 +147,8 @@
                             <div class="flex items-center gap-3 text-sm font-semibold text-slate-500">
                                 <span class="bg-slate-800 text-white px-2.5 py-0.5 rounded-md text-[11px] font-bold">Гр. {{ getGroupNumber(p.group_id) }}</span>
                                 <span class="bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-md text-[11px] font-bold">{{ getTermName(p.term_id) }}</span>
-                                <span>{{ getTeacherName(p.teacher_id) }} <template v-if="p.teacher2_id">+ {{ getTeacherName(p.teacher2_id) }}</template></span>
+                                <span>{{ p.teacher_id ? getTeacherName(p.teacher_id) : 'Не назначен' }} <template v-if="p.teacher2_id">+ {{ getTeacherName(p.teacher2_id) }}</template></span>
+                                <span v-if="p.room_name">{{ p.room_name }}<template v-if="p.room2_name"> / {{ p.room2_name }}</template></span>
                             </div>
                         </div>
 
@@ -135,8 +162,8 @@
                         </div>
 
                     </div>
-                    <div v-if="plans.length === 0" class="text-center text-slate-400 py-20 font-bold text-lg">
-                        Учебные планы еще не созданы.
+                    <div v-if="filteredPlans.length === 0" class="text-center text-slate-400 py-20 font-bold text-lg">
+                        {{ plans.length ? 'Для выбранных фильтров учебные планы не найдены.' : 'Учебные планы еще не созданы.' }}
                     </div>
                 </div>
             </div>
