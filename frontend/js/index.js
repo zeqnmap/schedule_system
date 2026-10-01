@@ -6,6 +6,8 @@ createApp({ setup() {
     const generationProgress = ref(0), generationCompleted = ref(0), generationTotal = ref(0);
     watch(isGenerating, active => document.body.classList.toggle('generation-active', active));
     const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), activeCardId = ref(null), curatorEdit = ref(null), generationScope = ref(null), generationSettings = ref([]), scheduleAction = ref(null), scheduleActionMonth = ref(''), errorMessage = ref('');
+    const slotOptions = ref({ plans: [], teachers: [], rooms: [] }), slotOptionsLoading = ref(false);
+    let slotOptionsRequestId = 0;
     let scheduleRequestId = 0;
     let archiveRequestId = 0;
     const currentGroup = computed(() => groups.value.find(gr => Number(gr.id) === Number(selectedGroupId.value)));
@@ -53,7 +55,7 @@ createApp({ setup() {
     };
     const currentWeekActualHours = computed(() => schedule.value.filter(e => e.status !== 'canceled').length);
     const showSaturday = computed(() => currentGroupHasSaturday.value || schedule.value.some(e => e.day_of_week === 6));
-    const groupPlans = computed(() => plans.value.filter(p => Number(p.group_id) === Number(selectedGroupId.value) && (!selectedTermId.value || Number(p.term_id) === Number(selectedTermId.value))));
+    const groupPlans = computed(() => plans.value.filter(p => Number(p.group_id) === Number(form.value.group_id) && Number(p.term_id) === Number(form.value.term_id) && slotOptions.value.plans.includes(p.id)));
     const loadCuratorOverrides = async () => { if (!selectedGroupId.value) { curatorOverrides.value = []; return; } const response = await fetch(`/group-curator-hour-overrides/?group_id=${selectedGroupId.value}`); curatorOverrides.value = response.ok ? await response.json() : []; };
     const loadCalendarBlocks = async () => {
         if (!selectedAcademicYearId.value || !selectedGroupId.value) { daysOff.value = []; groupBreakDays.value = []; return; }
@@ -181,25 +183,50 @@ createApp({ setup() {
     });
     const teacherBusy = teacherId => sameSlotEntries.value.some(entry => [entry.teacher_id, entry.teacher2_id].includes(teacherId));
     const roomBusy = roomName => sameSlotEntries.value.some(entry => [entry.room_name, entry.room2_name].includes(roomName));
-    const availableTeachers = computed(() => teachers.value.filter(teacher => teacherWorksOnDay(teacher) && !teacherBusy(teacher.id)));
+    const availableTeachers = computed(() => teachers.value.filter(teacher => slotOptions.value.teachers.includes(teacher.id) && teacherWorksOnDay(teacher) && !teacherBusy(teacher.id)));
     const availableTeachers2 = computed(() => availableTeachers.value.filter(teacher => teacher.id !== Number(form.value.teacher_id)));
-    const availableRooms = computed(() => rooms.value.filter(room => !roomBusy(room.name)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
-    const availableRooms2 = computed(() => availableRooms.value.filter(room => room.name !== form.value.room_name));
+    const availableRooms = computed(() => [...rooms.value, { name: 'Без кабинета' }].filter(room => slotOptions.value.rooms.includes(room.name) && (room.name === 'Без кабинета' || !roomBusy(room.name))).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
+    const availableRooms2 = computed(() => availableRooms.value.filter(room => room.name !== form.value.room_name && room.name !== 'Без кабинета'));
+    const loadSlotOptions = async () => {
+        const requestId = ++slotOptionsRequestId;
+        slotOptions.value = { plans: [], teachers: [], rooms: [] };
+        slotOptionsLoading.value = false;
+        if (!modalMode.value || !form.value.group_id || !form.value.term_id || !form.value.day_of_week || !form.value.time_slot) return;
+        slotOptionsLoading.value = true;
+        const params = new URLSearchParams({ group_id: form.value.group_id, term_id: form.value.term_id, week_number: form.value.week_number, day_of_week: form.value.day_of_week, time_slot: form.value.time_slot });
+        if (modalMode.value === 'edit') params.set('exclude_entry_id', form.value.id);
+        try {
+            const response = await fetch(`/schedule/available-options?${params}`);
+            if (!response.ok) throw new Error('Не удалось проверить доступность ресурсов');
+            const options = await response.json();
+            if (requestId !== slotOptionsRequestId) return;
+            slotOptions.value = options;
+            if (!groupPlans.value.some(plan => Number(plan.id) === Number(selectedPlanId.value))) { selectedPlanId.value = null; form.value.subject_name = ''; }
+            if (!availableTeachers.value.some(teacher => Number(teacher.id) === Number(form.value.teacher_id))) form.value.teacher_id = null;
+            if (!availableTeachers2.value.some(teacher => Number(teacher.id) === Number(form.value.teacher2_id))) form.value.teacher2_id = null;
+            if (!availableRooms.value.some(room => room.name === form.value.room_name)) form.value.room_name = '';
+            if (!availableRooms2.value.some(room => room.name === form.value.room2_name)) form.value.room2_name = null;
+        } catch (error) {
+            if (requestId === slotOptionsRequestId) errorMessage.value = error.message;
+        } finally {
+            if (requestId === slotOptionsRequestId) slotOptionsLoading.value = false;
+        }
+    };
     const syncAvailableResources = () => {
         if (!modalMode.value || modalMode.value === 'edit') return;
         if (!availableTimeSlots.value.includes(Number(form.value.time_slot))) form.value.time_slot = availableTimeSlots.value[0] || null;
-        if (!availableTeachers.value.some(teacher => Number(teacher.id) === Number(form.value.teacher_id))) form.value.teacher_id = availableTeachers.value[0]?.id || null;
+        if (!availableTeachers.value.some(teacher => Number(teacher.id) === Number(form.value.teacher_id))) form.value.teacher_id = null;
         if (!availableTeachers2.value.some(teacher => Number(teacher.id) === Number(form.value.teacher2_id))) form.value.teacher2_id = null;
-        if (!availableRooms.value.some(room => room.name === form.value.room_name)) form.value.room_name = availableRooms.value.find(room => room.name === teachers.value.find(teacher => Number(teacher.id) === Number(form.value.teacher_id))?.room_name)?.name || availableRooms.value[0]?.name || '';
+        if (!availableRooms.value.some(room => room.name === form.value.room_name)) form.value.room_name = '';
         if (!availableRooms2.value.some(room => room.name === form.value.room2_name)) form.value.room2_name = null;
     };
-    watch(() => [form.value.day_of_week, form.value.time_slot], syncAvailableResources);
+    watch(() => [form.value.day_of_week, form.value.time_slot], () => { syncAvailableResources(); loadSlotOptions(); });
     watch(() => form.value.room_name, () => { if (form.value.room2_name === form.value.room_name) form.value.room2_name = null; });
-    const onPlanChange = () => { const plan = plans.value.find(p => Number(p.id) === Number(selectedPlanId.value)); if (plan) { form.value.subject_name = plan.subject_name; form.value.teacher_id = plan.teacher_id; form.value.teacher2_id = plan.teacher2_id; form.value.room_name = plan.room_name || ''; form.value.room2_name = plan.room2_name || null; syncAvailableResources(); if (!form.value.room_name) updateRoomFromTeacher(); } };
-    const openEditModal = entry => { if (isArchived.value) return; modalMode.value = 'edit'; form.value = { ...entry }; const matchedPlan = plans.value.find(p => p.group_id === entry.group_id && p.term_id === entry.term_id && p.subject_name === entry.subject_name); selectedPlanId.value = matchedPlan?.id || null; };
+    const onPlanChange = () => { const plan = groupPlans.value.find(p => Number(p.id) === Number(selectedPlanId.value)); if (plan) { form.value.subject_name = plan.subject_name; form.value.teacher_id = availableTeachers.value.some(t => t.id === plan.teacher_id) ? plan.teacher_id : null; form.value.teacher2_id = availableTeachers2.value.some(t => t.id === plan.teacher2_id) ? plan.teacher2_id : null; form.value.room_name = availableRooms.value.some(room => room.name === plan.room_name) ? plan.room_name : ''; form.value.room2_name = availableRooms2.value.some(room => room.name === plan.room2_name) ? plan.room2_name : null; if (!form.value.room_name) updateRoomFromTeacher(); } };
+    const openEditModal = entry => { if (isArchived.value) return; modalMode.value = 'edit'; form.value = { ...entry }; const matchedPlan = plans.value.find(p => p.group_id === entry.group_id && p.term_id === entry.term_id && p.subject_name === entry.subject_name); selectedPlanId.value = matchedPlan?.id || null; loadSlotOptions(); };
     const toggleCardActions = entryId => { if (!isArchived.value) activeCardId.value = activeCardId.value === entryId ? null : entryId; };
-    const openCreateModal = (day, slot) => { if (isArchived.value || curatorHourAt(day, slot) || hasActiveEntry(day, slot)) return; modalMode.value = 'create'; selectedPlanId.value = null; form.value = { week_number: selectedWeek.value, term_id: selectedTermId.value, day_of_week: day, time_slot: slot, teacher_id: null, teacher2_id: null, group_id: Number(selectedGroupId.value), subject_name: '', status: 'planned', room_name: '', room2_name: null }; syncAvailableResources(); };
-    const saveEntry = async () => { const url = modalMode.value === 'edit' ? `/schedule/${form.value.id}` : '/schedule/'; const response = await fetch(url, { method: modalMode.value === 'edit' ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form.value) }); if (!response.ok) { const data = await response.json().catch(() => ({})); errorMessage.value = data.detail || 'Не удалось сохранить занятие'; return; } await fetchSchedule(); modalMode.value = null; };
+    const openCreateModal = (day, slot) => { if (isArchived.value || curatorHourAt(day, slot) || hasActiveEntry(day, slot)) return; modalMode.value = 'create'; selectedPlanId.value = null; form.value = { week_number: selectedWeek.value, term_id: selectedTermId.value, day_of_week: day, time_slot: slot, teacher_id: null, teacher2_id: null, group_id: Number(selectedGroupId.value), subject_name: '', status: 'planned', room_name: '', room2_name: null }; loadSlotOptions(); };
+    const saveEntry = async () => { if (slotOptionsLoading.value || !groupPlans.value.some(plan => Number(plan.id) === Number(selectedPlanId.value)) || !availableTeachers.value.some(teacher => Number(teacher.id) === Number(form.value.teacher_id)) || !availableRooms.value.some(room => room.name === form.value.room_name)) { errorMessage.value = 'Выберите доступные предмет, преподавателя и кабинет'; return; } const url = modalMode.value === 'edit' ? `/schedule/${form.value.id}` : '/schedule/'; const response = await fetch(url, { method: modalMode.value === 'edit' ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form.value) }); if (!response.ok) { const data = await response.json().catch(() => ({})); errorMessage.value = data.detail || 'Не удалось сохранить занятие'; return; } await fetchSchedule(); modalMode.value = null; };
     const deleteEntry = async () => { if (!confirm('ВНИМАНИЕ! Это полностью сотрет урок из базы. Продолжить?')) return; await fetch(`/schedule/${form.value.id}`, { method: 'DELETE' }); await fetchSchedule(); modalMode.value = null; };
     const cancelEntry = async () => { await fetch(`/schedule/${form.value.id}/cancel`, { method: 'POST' }); await fetchSchedule(); modalMode.value = null; };
     const restoreEntry = async () => { await fetch(`/schedule/${form.value.id}/restore`, { method: 'POST' }); await fetchSchedule(); modalMode.value = null; };
@@ -345,5 +372,5 @@ createApp({ setup() {
         if (!response.ok) { errorMessage.value = data.detail || 'Не удалось отправить PDF в Telegram'; return; }
         alert(data.job_id ? `PDF поставлен в очередь для ${data.queued} подписчиков. Номер рассылки: ${data.job_id}.` : `Рассылка завершена: отправлено ${data.delivered}, ошибок ${data.failed}.`);
     };
-    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, generationProgress, generationCompleted, generationTotal, modalMode, form, selectedPlanId, activeCardId, curatorEdit, generationScope, generationSettings, scheduleAction, scheduleActionMonthTitle, scheduleActionCalendarDays, scheduleActionMonth, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTimeSlots, availableTeachers, availableTeachers2, availableRooms, availableRooms2, getDayName, getTeacherName, getTeacherNames, getRoomNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, cancelCardEntry, restoreCardEntry, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, generateScheduleAll, exportPdf, exportTeachersPdf, openScheduleActions, selectScheduleActionDay, selectScheduleActionDate, previousScheduleActionMonth, nextScheduleActionMonth, downloadScheduleAction, broadcastScheduleAction, broadcastSchedule, formatDayDate, isBeforeTermStart };
+    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, generationProgress, generationCompleted, generationTotal, modalMode, form, selectedPlanId, slotOptionsLoading, activeCardId, curatorEdit, generationScope, generationSettings, scheduleAction, scheduleActionMonthTitle, scheduleActionCalendarDays, scheduleActionMonth, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTimeSlots, availableTeachers, availableTeachers2, availableRooms, availableRooms2, getDayName, getTeacherName, getTeacherNames, getRoomNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, cancelCardEntry, restoreCardEntry, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, generateScheduleAll, exportPdf, exportTeachersPdf, openScheduleActions, selectScheduleActionDay, selectScheduleActionDate, previousScheduleActionMonth, nextScheduleActionMonth, downloadScheduleAction, broadcastScheduleAction, broadcastSchedule, formatDayDate, isBeforeTermStart };
 } }).component('searchable-select', SearchableSelect).mount('#app');

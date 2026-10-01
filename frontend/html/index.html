@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="../css/app-shell.css?v=20260933">
-    <link rel="stylesheet" href="../css/index.css?v=20261001-generation">
+    <link rel="stylesheet" href="../css/index.css?v=20261001-toolbar3">
     <script src="../js/searchable-select.js"></script>
     <script src="../js/auth.js" defer></script>
     <script src="../js/app-nav.js?v=20260933" defer></script>
@@ -121,38 +121,34 @@
             </div>
         </Transition>
 
-        <div class="bento-card p-6 mb-10 flex flex-wrap gap-6 items-center justify-between">
-            <div class="flex flex-wrap items-center gap-4 w-full xl:w-auto">
-                <div class="flex items-center gap-3">
-                    <searchable-select v-model="selectedGroupId" :options="groups" option-label="number"
-                        placeholder="Выберите группу" search-placeholder="Найти группу..."
-                        :format-option="group => `Группа ${group.number}`" class="input-modern px-5 py-3 text-slate-900 font-black text-lg w-48 cursor-pointer"></searchable-select>
-                </div>
-                <div v-if="currentGroupTerms.length" class="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 border border-slate-200" role="tablist" aria-label="Выбор семестра">
-                        <button v-for="term in currentGroupTerms" :key="term.id" type="button" role="tab"
-                            :aria-selected="Number(selectedTermId) === Number(term.id)"
-                            @click="selectTerm(term.id)"
-                            :class="Number(selectedTermId) === Number(term.id) ? 'bg-white text-emerald-700 shadow-sm border-slate-200' : 'text-slate-500 hover:text-slate-800 border-transparent'"
-                        class="px-4 py-2.5 rounded-xl border text-sm font-black transition-all whitespace-nowrap flex-1">
-                            {{ term.name }}<span v-if="term.is_locked" class="text-[10px] ml-1">· завершён</span>
-                        </button>
-                </div>
-                <div v-else class="input-modern px-5 py-3 text-slate-400 font-bold text-sm">Семестры не заданы</div>
-                <div class="flex items-center gap-3">
-                    <label class="relative"><span class="sr-only">Выберите дату недели</span><input v-model="selectedDate" :min="currentTerm?.start_date" :max="currentTerm?.end_date" type="date" class="input-modern px-5 py-3 text-slate-900 font-black text-base w-48 cursor-pointer" title="Выберите любой день: откроется вся неделя"></label>
-                </div>
-                <button @click="changeWeeklyHoursPrompt" class="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-extrabold text-sm transition-all flex items-center gap-2">
-                    Уроков за неделю: <span class="text-emerald-600">{{ currentWeekActualHours }}</span> / {{ currentGroupWeeklyHours }}
-                </button>
-                <button @click="toggleSaturdayForGroup" :class="currentGroupHasSaturday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-5 py-3.5 rounded-2xl font-extrabold text-sm border transition-all flex items-center gap-2">
-                    {{ currentGroupHasSaturday ? '📅 6 дней (суббота вкл)' : '☕ 5 дней (без субботы)' }}
+        <div class="bento-card schedule-toolbar p-6 mb-10">
+            <div class="schedule-toolbar__group">
+                <searchable-select v-model="selectedGroupId" :options="groups" option-label="number"
+                    placeholder="Выберите группу" search-placeholder="Найти группу..."
+                    :format-option="group => `Группа ${group.number}`" class="input-modern px-5 py-3 text-slate-900 font-black text-lg w-48 cursor-pointer"></searchable-select>
+            </div>
+            <div v-if="currentGroupTerms.length" class="schedule-toolbar__term flex items-center gap-1 p-1 rounded-2xl bg-slate-100 border border-slate-200" role="tablist" aria-label="Выбор семестра">
+                <button v-for="term in currentGroupTerms" :key="term.id" type="button" role="tab"
+                    :aria-selected="Number(selectedTermId) === Number(term.id)"
+                    @click="selectTerm(term.id)"
+                    :class="Number(selectedTermId) === Number(term.id) ? 'bg-white text-emerald-700 shadow-sm border-slate-200' : 'text-slate-500 hover:text-slate-800 border-transparent'"
+                    class="px-4 py-2.5 rounded-xl border text-sm font-black transition-all whitespace-nowrap flex-1">
+                    {{ term.name }}<span v-if="term.is_locked" class="text-[10px] ml-1">· завершён</span>
                 </button>
             </div>
-            <div class="flex flex-col sm:flex-row gap-2 w-full xl:w-auto">
-                <button @click="toggleArchive" :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-4 py-3.5 rounded-2xl font-extrabold text-xs border transition-all w-full sm:w-auto" :title="`Только группа ${currentGroupNumber}`">
+            <div v-else class="schedule-toolbar__term input-modern px-5 py-3 text-slate-400 font-bold text-sm">Семестры не заданы</div>
+            <label class="schedule-toolbar__date relative"><span class="sr-only">Выберите дату недели</span><input v-model="selectedDate" :min="currentTerm?.start_date" :max="currentTerm?.end_date" type="date" class="input-modern px-5 py-3 text-slate-900 font-black text-base w-full cursor-pointer" title="Выберите любой день: откроется вся неделя"></label>
+            <button @click="changeWeeklyHoursPrompt" class="schedule-toolbar__hours bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-extrabold text-sm transition-all flex items-center justify-center gap-2">
+                Уроков за неделю: <span class="text-emerald-600">{{ currentWeekActualHours }}</span> / {{ currentGroupWeeklyHours }}
+            </button>
+            <button @click="toggleSaturdayForGroup" :class="currentGroupHasSaturday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="schedule-toolbar__saturday px-5 py-3.5 rounded-2xl font-extrabold text-sm border transition-all flex items-center justify-center gap-2">
+                {{ currentGroupHasSaturday ? '📅 6 дней (суббота вкл)' : '☕ 5 дней (без субботы)' }}
+            </button>
+            <div class="schedule-toolbar__locks flex gap-2">
+                <button @click="toggleArchive" :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-4 py-3.5 rounded-2xl font-extrabold text-xs border transition-all" :title="`Только группа ${currentGroupNumber}`">
                     {{ isArchived ? '🔓 Группа' : '🔒 Группа' }}
                 </button>
-                <button @click="toggleArchiveAll" :class="isArchivedAll ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-6 py-3.5 rounded-2xl font-extrabold text-sm border transition-all w-full sm:w-auto">
+                <button @click="toggleArchiveAll" :class="isArchivedAll ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-6 py-3.5 rounded-2xl font-extrabold text-sm border transition-all">
                     {{ isArchivedAll ? '🔓 Разблокировать все' : '🔒 Заблокировать все' }}
                 </button>
             </div>
@@ -293,14 +289,14 @@
                                 <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет 1</label>
                                 <select v-model="form.room_name" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer" required>
                                     <option value="">Выберите кабинет</option>
-                                    <option v-for="room in availableRooms" :key="room.name" :value="room.name">Каб. {{ room.name }}</option>
+                                    <option v-for="room in availableRooms" :key="room.name" :value="room.name">{{ room.name === 'Без кабинета' ? room.name : `Каб. ${room.name}` }}</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет 2</label>
                                 <select v-model="form.room2_name" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
                                     <option :value="null">Нет</option>
-                                    <option v-for="room in availableRooms2" :key="room.name" :value="room.name">Каб. {{ room.name }}</option>
+                                    <option v-for="room in availableRooms2" :key="room.name" :value="room.name">{{ room.name === 'Без кабинета' ? room.name : `Каб. ${room.name}` }}</option>
                                 </select>
                             </div>
                         </div>
@@ -314,7 +310,7 @@
                         </div>
                         <div class="flex gap-3">
                             <button @click="modalMode = null" class="px-6 py-3 text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-bold rounded-2xl transition-all">Отмена</button>
-                            <button @click="saveEntry" class="btn-emerald font-extrabold py-3 px-8 rounded-2xl text-base">Сохранить</button>
+                            <button @click="saveEntry" :disabled="slotOptionsLoading || !selectedPlanId || !form.teacher_id || !form.room_name" class="btn-emerald font-extrabold py-3 px-8 rounded-2xl text-base disabled:opacity-50 disabled:cursor-not-allowed">Сохранить</button>
                         </div>
                     </div>
                 </div>

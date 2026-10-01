@@ -1323,6 +1323,78 @@ def get_schedule(group_id: Optional[int] = None, week_number: int = 1, term_id: 
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
 
 
+@app.get("/schedule/available-options")
+def get_schedule_available_options(group_id: int, term_id: int, week_number: int, day_of_week: int, time_slot: int, exclude_entry_id: Optional[int] = None, db: Session = Depends(database.get_db)):
+    term = db.query(models.GroupTerm).filter_by(id=term_id, group_id=group_id).first()
+    if not term or not 1 <= day_of_week <= 6 or not 1 <= time_slot <= 12:
+        raise HTTPException(status_code=400, detail="Укажите группу, семестр, день и урок")
+    year = db.query(models.AcademicYear).filter_by(id=term.academic_year_id).first()
+    if not year:
+        raise HTTPException(status_code=400, detail="Учебный год не найден")
+    target_date = solver.calendar_date_for_slot(year, week_number, day_of_week - 1)
+    group = db.query(models.Group).filter_by(id=group_id).first()
+    if (not group or not group_has_classes_on_date(db, group_id, term.academic_year_id, target_date)
+            or target_date < term.start_date or target_date > term.end_date
+            or (day_of_week == 6 and not group.has_saturday)
+            or db.query(models.AcademicDayOff).filter_by(academic_year_id=term.academic_year_id, day_date=target_date).first()
+            or db.query(models.GroupBreakDay).filter_by(group_id=group_id, academic_year_id=term.academic_year_id, day_date=target_date).first()):
+        return {"plans": [], "teachers": [], "rooms": []}
+    entries = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.academic_year_id == term.academic_year_id,
+        models.ScheduleEntry.week_number == week_number,
+        models.ScheduleEntry.day_of_week == day_of_week,
+        models.ScheduleEntry.time_slot == time_slot,
+        models.ScheduleEntry.status != "canceled",
+    ).all()
+    entries = [entry for entry in entries if entry.id != exclude_entry_id]
+    if any(entry.group_id == group_id for entry in entries):
+        return {"plans": [], "teachers": [], "rooms": []}
+    reserved_teachers = {teacher_id for entry in entries for teacher_id in (entry.teacher_id, entry.teacher2_id) if teacher_id}
+    reserved_rooms = {room for entry in entries for room in entry_room_names(entry) if room != "Без кабинета"}
+    hours = db.query(models.CuratorHour).filter(
+        models.CuratorHour.is_active.is_(True),
+        models.CuratorHour.day_of_week == day_of_week,
+        models.CuratorHour.time_slot <= time_slot,
+        models.CuratorHour.time_slot + models.CuratorHour.duration > time_slot,
+    ).all()
+    overrides = {
+        (item.group_id, item.curator_hour_id): item
+        for item in db.query(models.GroupCuratorHourOverride).filter_by(schedule_date=target_date).all()
+    }
+    groups = db.query(models.Group).all()
+    for hour in hours:
+        targets = [group for group in groups if group.id == hour.group_id] if hour.group_id else groups
+        for group in targets:
+            if not group_has_classes_on_date(db, group.id, term.academic_year_id, target_date):
+                continue
+            override = overrides.get((group.id, hour.id))
+            if override and override.is_hidden:
+                continue
+            if group.id == group_id:
+                return {"plans": [], "teachers": [], "rooms": []}
+            teacher_id = override.teacher_id if override and override.teacher_id is not None else (hour.teacher_id or group.curator_teacher_id)
+            room = override.room_name if override and override.room_name is not None else (hour.room_name or group.curator_room_name)
+            if teacher_id:
+                reserved_teachers.add(teacher_id)
+            if room:
+                reserved_rooms.add(room.strip())
+    available_teachers = [teacher for teacher in db.query(models.Teacher).filter_by(is_active=True).all()
+                          if teacher.id not in reserved_teachers and teacher_works_on_day(teacher, day_of_week)
+                          and not teacher_is_on_vacation(teacher, week_number)
+                          and not is_teacher_on_date_vacation(teacher.id, term.academic_year_id, target_date, db)]
+    teacher_ids = {teacher.id for teacher in available_teachers}
+    plans = db.query(models.CoursePlan).filter_by(group_id=group_id, term_id=term_id).all()
+    available_plans = [
+        plan.id for plan in plans
+        if all(teacher_id in teacher_ids for teacher_id in (plan.teacher_id, plan.teacher2_id) if teacher_id)
+        and all(room not in reserved_rooms for room in entry_room_names(plan) if room != "Без кабинета")
+    ]
+    available_rooms = [room.name for room in db.query(models.Room).all() if room.name.strip() not in reserved_rooms]
+    if "Без кабинета" not in available_rooms:
+        available_rooms.append("Без кабинета")
+    return {"plans": available_plans, "teachers": sorted(teacher_ids), "rooms": available_rooms}
+
+
 def entry_room_names(entry):
     return list(dict.fromkeys(
         name.strip() for name in (entry.room_name, entry.room2_name)
@@ -2040,18 +2112,34 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
     if blocked:
         raise HTTPException(status_code=409, detail="Этот слот заблокирован кураторским часом")
     group = db.query(models.Group).filter_by(id=data.group_id).first()
-    global_hours = db.query(models.CuratorHour).filter(
-        models.CuratorHour.group_id.in_([0, None]), models.CuratorHour.day_of_week == data.day_of_week,
-        models.CuratorHour.is_active.is_(True), models.CuratorHour.time_slot <= data.time_slot,
+    if group and data.day_of_week == 6 and not group.has_saturday:
+        raise HTTPException(status_code=409, detail="Для этой группы суббота не включена")
+    same_time_curators = db.query(models.CuratorHour).filter(
+        models.CuratorHour.is_active.is_(True),
+        models.CuratorHour.day_of_week == data.day_of_week,
+        models.CuratorHour.time_slot <= data.time_slot,
         models.CuratorHour.time_slot + models.CuratorHour.duration > data.time_slot,
     ).all()
-    global_hours = [item for item in global_hours if item.id not in hidden_hour_ids]
-    if group and global_hours:
-        if group.curator_teacher_id and group.curator_teacher_id in teacher_ids:
-            raise HTTPException(status_code=409, detail="Куратор группы уже занят общим часом")
-        if group.curator_room_name and group.curator_room_name.strip() in requested_rooms:
-            raise HTTPException(status_code=409, detail="Кабинет группы занят общим часом")
+    curator_overrides = {
+        (item.group_id, item.curator_hour_id): item
+        for item in db.query(models.GroupCuratorHourOverride).filter_by(schedule_date=target_date).all()
+    }
+    for hour in same_time_curators:
+        target_groups = db.query(models.Group).all() if not hour.group_id else db.query(models.Group).filter_by(id=hour.group_id).all()
+        for curator_group in target_groups:
+            if not group_has_classes_on_date(db, curator_group.id, data.academic_year_id, target_date):
+                continue
+            override = curator_overrides.get((curator_group.id, hour.id))
+            if override and override.is_hidden:
+                continue
+            curator_teacher = override.teacher_id if override and override.teacher_id is not None else (hour.teacher_id or curator_group.curator_teacher_id)
+            curator_room = override.room_name if override and override.room_name is not None else (hour.room_name or curator_group.curator_room_name)
+            if curator_teacher in teacher_ids:
+                raise HTTPException(status_code=409, detail="Преподаватель занят кураторским часом")
+            if curator_room and curator_room.strip() in requested_rooms:
+                raise HTTPException(status_code=409, detail="Кабинет занят кураторским часом")
     query = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.academic_year_id == data.academic_year_id,
         models.ScheduleEntry.week_number == data.week_number,
         models.ScheduleEntry.day_of_week == data.day_of_week,
         models.ScheduleEntry.time_slot == data.time_slot,

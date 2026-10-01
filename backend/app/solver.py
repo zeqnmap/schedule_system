@@ -180,7 +180,9 @@ def mode_limits(demand, remaining):
         return weekly // 2, 1 if remaining % 2 else 0
     if demand.mode == "pair_and_lesson":
         return min(1, weekly // 2), min(1, weekly)
-    return weekly // 2, weekly % 2
+    # Auto mode may use a single hour even when the semester remainder is
+    # even, e.g. the only free slot after a curator hour is lesson six.
+    return weekly // 2, weekly
 
 
 def validate_rules(groups, terms, course_plans, rules):
