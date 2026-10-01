@@ -780,7 +780,7 @@ def validate_group_curator_assignment(group_id: int, teacher_id: Optional[int], 
         ).all()
         if teacher_id and any(teacher_id in {entry.teacher_id, entry.teacher2_id} for entry in occupied_entries):
             raise HTTPException(status_code=409, detail="Этот куратор уже ведёт занятие в выбранный день и урок")
-        if room_name and any((entry.room_name or '').strip() == room_name for entry in occupied_entries):
+        if room_name and any(room_name in entry_room_names(entry) for entry in occupied_entries):
             raise HTTPException(status_code=409, detail="Этот кабинет уже занят в выбранный день и урок")
         for other in db.query(models.Group).filter(models.Group.id != group_id if group_id is not None else True).all():
             if teacher_id and teacher_id == other.curator_teacher_id:
@@ -933,8 +933,16 @@ def delete_subject(subject_id: int, db: Session = Depends(database.get_db)):
 
 
 # ----------------- УЧЕБНЫЕ ПЛАНЫ -----------------
+def normalize_plan_rooms(plan):
+    plan.room_name = (plan.room_name or "").strip() or None
+    plan.room2_name = (plan.room2_name or "").strip() or None
+    if plan.room_name and plan.room_name == plan.room2_name:
+        raise HTTPException(status_code=400, detail="Выберите разные кабинеты для дисциплины")
+
+
 @app.post("/course_plans/", response_model=schemas.CoursePlanOut)
 def create_course_plan(plan: schemas.CoursePlanCreate, db: Session = Depends(database.get_db)):
+    normalize_plan_rooms(plan)
     if plan.term_id:
         term = db.query(models.GroupTerm).filter_by(id=plan.term_id, group_id=plan.group_id).first()
         if not term:
@@ -956,6 +964,7 @@ def read_course_plans(skip: int = 0, limit: int = 1000, academic_year_id: Option
 
 @app.put("/course_plans/{plan_id}", response_model=schemas.CoursePlanOut)
 def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, db: Session = Depends(database.get_db)):
+    normalize_plan_rooms(plan_data)
     plan = db.query(models.CoursePlan).filter(models.CoursePlan.id == plan_id).first()
     if plan_data.term_id and not db.query(models.GroupTerm).filter_by(id=plan_data.term_id, group_id=plan_data.group_id).first():
         raise HTTPException(status_code=400, detail="Выбранный семестр не принадлежит этой группе")
@@ -967,8 +976,8 @@ def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, db: Se
     plan.teacher2_id = plan_data.teacher2_id
     plan.teacher_hours = plan_data.teacher_hours
     plan.teacher2_hours = plan_data.teacher2_hours
-    plan.room_name = (plan_data.room_name or "").strip() or None
-    plan.room2_name = (plan_data.room2_name or "").strip() or None
+    plan.room_name = plan_data.room_name
+    plan.room2_name = plan_data.room2_name
     plan.term_id = plan_data.term_id
     if plan_data.term_id:
         plan.academic_year_id = db.query(models.GroupTerm).filter_by(id=plan_data.term_id).first().academic_year_id
@@ -1314,6 +1323,28 @@ def get_schedule(group_id: Optional[int] = None, week_number: int = 1, term_id: 
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
 
 
+def entry_room_names(entry):
+    return list(dict.fromkeys(
+        name.strip() for name in (entry.room_name, entry.room2_name)
+        if name and name.strip()
+    ))
+
+
+def fit_pdf_cell(text_value: str, width: float, font_name: str = "ScheduleFont", font_size: float = 8) -> str:
+    value = str(text_value or "-")
+    if stringWidth(value, font_name, font_size) <= width:
+        return value
+    suffix = "…"
+    low, high = 0, len(value)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if stringWidth(value[:middle].rstrip() + suffix, font_name, font_size) <= width:
+            low = middle
+        else:
+            high = middle - 1
+    return value[:low].rstrip() + suffix
+
+
 def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None):
     font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
     if not font_path:
@@ -1401,7 +1432,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
             rows_by_group.setdefault(entry.group_id, []).append((
                 entry.time_slot,
                 0,
-                [str(group_numbers.get(entry.group_id, entry.group_id)), str(entry.time_slot), entry.subject_name or "-", entry.room_name or "-", teacher_name],
+                [str(group_numbers.get(entry.group_id, entry.group_id)), str(entry.time_slot), entry.subject_name or "-", " / ".join(entry_room_names(entry)) or "-", teacher_name],
                 False,
             ))
 
@@ -1442,6 +1473,8 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
 
         subject_width = max([stringWidth(str(entry.subject_name or "Предмет"), "ScheduleFont", 8) + 10 * mm for entry in day_entries] or [45 * mm])
         subject_width = min(max(subject_width, 45 * mm), 125 * mm)
+        for row in rows[1:]:
+            row[2] = fit_pdf_cell(row[2], subject_width - 14)
         table = Table(rows, colWidths=[23 * mm, 20 * mm, subject_width, 27 * mm, 52 * mm], repeatRows=1, hAlign="CENTER")
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
@@ -1456,6 +1489,8 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
         ]
         for group_index, (start_row, end_row) in enumerate(group_spans):
             style.append(("SPAN", (0, start_row), (0, end_row)))
+            if group_index:
+                style.append(("LINEABOVE", (0, start_row), (-1, start_row), 0.35, colors.black))
             style.append(("FONTNAME", (0, start_row), (0, start_row), "ScheduleFont-Bold"))
             style.append(("FONTSIZE", (0, start_row), (0, start_row), 10))
             style.append(("BACKGROUND", (0, start_row), (0, end_row), colors.HexColor("#e8f3f1") if group_index % 2 == 0 else colors.HexColor("#eef2f7")))
@@ -1540,7 +1575,7 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
                 rows_by_teacher.setdefault(teacher_id, {})[entry.time_slot] = {
                     "subject": entry.subject_name or "—",
                     "group": groups.get(entry.group_id, entry.group_id),
-                    "room": entry.room_name or "—",
+                    "room": " / ".join(entry_room_names(entry)) or "—",
                     "curator": False,
                 }
         for item in (item for item in curator_hours if item.day_of_week == selected_day):
@@ -1976,6 +2011,9 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
     ).first():
         raise HTTPException(status_code=409, detail="Для этой группы установлен перерыв на выбранную дату")
     teacher_ids = {teacher_id for teacher_id in (data.teacher_id, data.teacher2_id) if teacher_id}
+    requested_rooms = {name for name in entry_room_names(data) if name != "Без кабинета"}
+    if data.room2_name and data.room_name.strip() == data.room2_name.strip():
+        raise HTTPException(status_code=400, detail="Выберите разные кабинеты для занятия")
     selected_teachers = db.query(models.Teacher).filter(models.Teacher.id.in_(teacher_ids)).all()
     if len(selected_teachers) != len(teacher_ids):
         raise HTTPException(status_code=400, detail="Выбранный преподаватель не найден")
@@ -2011,7 +2049,7 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
     if group and global_hours:
         if group.curator_teacher_id and group.curator_teacher_id in teacher_ids:
             raise HTTPException(status_code=409, detail="Куратор группы уже занят общим часом")
-        if group.curator_room_name and data.room_name.strip() == group.curator_room_name.strip():
+        if group.curator_room_name and group.curator_room_name.strip() in requested_rooms:
             raise HTTPException(status_code=409, detail="Кабинет группы занят общим часом")
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == data.week_number,
@@ -2029,14 +2067,19 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
         new_teachers = {teacher_id for teacher_id in (data.teacher_id, data.teacher2_id) if teacher_id}
         if existing_teachers & new_teachers:
             raise HTTPException(status_code=409, detail="Преподаватель уже занят в этот день и этот урок")
-        same_room = bool(data.room_name and entry.room_name and data.room_name.strip() == entry.room_name.strip() and data.room_name.strip() != "Без кабинета")
-        shared_pe = is_physical_education(data.subject_name) and is_physical_education(entry.subject_name) and not (existing_teachers & new_teachers)
-        if same_room and not shared_pe:
-            raise HTTPException(status_code=409, detail="Кабинет уже занят в этот день и этот урок")
-        if same_room and shared_pe:
-            pe_in_room = [item for item in entries if item.room_name and item.room_name.strip() == data.room_name.strip() and is_physical_education(item.subject_name)]
-            if len(pe_in_room) >= 2:
-                raise HTTPException(status_code=409, detail="В одном спортивном зале одновременно допустимы максимум две группы")
+    for room_name in requested_rooms:
+        occupied = [entry for entry in entries if room_name in entry_room_names(entry)]
+        if not occupied:
+            continue
+        shared_pe = (
+            solver.is_sports_room(room_name)
+            and is_physical_education(data.subject_name)
+            and all(is_physical_education(entry.subject_name) for entry in occupied)
+        )
+        if not shared_pe:
+            raise HTTPException(status_code=409, detail=f"Кабинет {room_name} уже занят в этот день и этот урок")
+        if len(occupied) >= 2:
+            raise HTTPException(status_code=409, detail="В одном спортивном зале одновременно допустимы максимум две группы")
 
 @app.post("/schedule/", response_model=schemas.ScheduleEntryOut)
 def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session = Depends(database.get_db)):

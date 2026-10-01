@@ -5,6 +5,8 @@ createApp({ setup() {
     const selectedGroupId = ref(null), selectedTermId = ref(null), filterGroupSearch = ref('');
     const emptyForm = () => ({ group_id: null, term_id: null, subject_name: '', total_hours: null, max_weekly_hours: 4, teacher_id: null, teacher2_id: null, teacher_hours: null, teacher2_hours: null, room_name: null, room2_name: null });
     const form = ref(emptyForm());
+    const availableSecondRooms = computed(() => rooms.value.filter(room => room.name !== form.value.room_name));
+    watch(() => form.value.room_name, roomName => { if (form.value.room2_name === roomName) form.value.room2_name = null; });
     const errorMessage = ref('');
     const fetchData = async () => { try {
         const yearId = localStorage.getItem('edusync-academic-year-id'); const yearParam = yearId ? `?academic_year_id=${yearId}&limit=1000` : '?limit=1000';
@@ -37,5 +39,5 @@ createApp({ setup() {
     const editPlan = p => { editingPlanId.value = p.id; form.value = { ...p }; };
     const resetForm = () => { editingPlanId.value = null; form.value = emptyForm(); };
     const deletePlan = async id => { if (!confirm('Точно удалить этот план?')) return; await fetch(`/course_plans/${id}`, { method: 'DELETE' }); fetchData(); };
-    return { groups, subjects, teachers, rooms, plans, terms, form, editingPlanId, errorMessage, selectedGroupId, selectedTermId, filterGroupSearch, filteredGroups, availableFilterTerms, filteredPlans, termsForForm, getTermName, formatDate, savePlan, editPlan, resetForm, deletePlan, getGroupNumber, getTeacherName };
+    return { groups, subjects, teachers, rooms, availableSecondRooms, plans, terms, form, editingPlanId, errorMessage, selectedGroupId, selectedTermId, filterGroupSearch, filteredGroups, availableFilterTerms, filteredPlans, termsForForm, getTermName, formatDate, savePlan, editPlan, resetForm, deletePlan, getGroupNumber, getTeacherName };
 } }).component('searchable-select', SearchableSelect).mount('#app');

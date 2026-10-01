@@ -230,7 +230,7 @@
                                 {{ getTeacherNames(entry) }}
                             </span>
                             <span class="px-2 py-1 rounded-md text-[10px] font-black tracking-widest shrink-0" :class="entry.status === 'canceled' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-700'">
-                                КАБ {{ entry.room_name }}
+                                КАБ {{ getRoomNames(entry) }}
                             </span>
                         </div>
                     </div>
@@ -288,12 +288,21 @@
                                     placeholder="--- Нет ---" search-placeholder="Найти преподавателя..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
                             </div>
                         </div>
-                        <div>
-                            <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет</label>
-                            <select v-model="form.room_name" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer" required>
-                                <option value="">Выберите свободный кабинет</option>
-                                <option v-for="room in availableRooms" :key="room.name" :value="room.name">Каб. {{ room.name }}</option>
-                            </select>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет 1</label>
+                                <select v-model="form.room_name" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer" required>
+                                    <option value="">Выберите кабинет</option>
+                                    <option v-for="room in availableRooms" :key="room.name" :value="room.name">Каб. {{ room.name }}</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет 2</label>
+                                <select v-model="form.room2_name" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer">
+                                    <option :value="null">Нет</option>
+                                    <option v-for="room in availableRooms2" :key="room.name" :value="room.name">Каб. {{ room.name }}</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
 
