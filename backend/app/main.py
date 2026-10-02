@@ -1104,6 +1104,40 @@ def save_group_curator_hour_override(group_id: int, curator_hour_id: int, data: 
     return item
 
 
+@app.post("/curator-hours/{curator_hour_id}/hide-for-all")
+def hide_curator_hour_for_all_groups(curator_hour_id: int, schedule_date: date, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    """Hide one occurrence of a common curator hour for every group."""
+    hour = db.query(models.CuratorHour).filter(
+        models.CuratorHour.id == curator_hour_id,
+        models.CuratorHour.is_active.is_(True),
+        models.CuratorHour.group_id.in_([0, None]),
+    ).first()
+    if not hour:
+        raise HTTPException(status_code=404, detail="Общий кураторский час не найден")
+    if schedule_date.isoweekday() != hour.day_of_week:
+        raise HTTPException(status_code=400, detail="Дата не соответствует дню этого часа")
+
+    group_ids = [group_id for group_id, in db.query(models.Group.id).all()]
+    overrides = {
+        item.group_id: item
+        for item in db.query(models.GroupCuratorHourOverride).filter_by(
+            curator_hour_id=curator_hour_id, schedule_date=schedule_date
+        ).all()
+    }
+    for group_id in group_ids:
+        item = overrides.get(group_id)
+        if not item:
+            item = models.GroupCuratorHourOverride(
+                group_id=group_id,
+                curator_hour_id=curator_hour_id,
+                schedule_date=schedule_date,
+            )
+            db.add(item)
+        item.is_hidden = True
+    db.commit()
+    return {"ok": True, "hidden_for_groups": len(group_ids)}
+
+
 @app.post("/curator-hours/", response_model=schemas.CuratorHourOut)
 def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     if not 1 <= data.day_of_week <= 6 or not 1 <= data.time_slot <= 12 or data.duration not in (1, 2):

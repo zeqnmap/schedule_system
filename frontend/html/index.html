@@ -171,8 +171,9 @@
 
                     <!-- Если слот ПУСТОЙ -->
                     <div v-if="curatorHourAt(day, slot)" class="lesson-action-shell" :class="{ 'lesson-action-shell--open': activeCardId === curatorCardId(curatorHourAt(day, slot)) }" @mouseleave="activeCardId = null">
-                        <div v-if="!isArchived" class="lesson-action-menu lesson-action-menu--two" @click.stop>
+                        <div v-if="!isArchived" class="lesson-action-menu" @click.stop>
                             <button @click="removeCuratorHourFromGroup(curatorHourAt(day, slot))" class="lesson-action-button lesson-action-button--delete">Удалить</button>
+                            <button @click="removeCuratorHourForAllGroups(curatorHourAt(day, slot))" class="lesson-action-button lesson-action-button--cancel">Удалить у всех</button>
                             <button @click="openCuratorEdit(curatorHourAt(day, slot))" class="lesson-action-edit">Изменить</button>
                         </div>
                         <div @click.stop="toggleCardActions(curatorCardId(curatorHourAt(day, slot)))" class="slot-card lesson-action-card p-4 flex flex-col border border-slate-200 bg-white cursor-pointer"><div class="absolute top-0 left-0 w-1.5 h-full bg-amber-400"></div><div class="flex justify-between items-start mb-1 relative z-20"><span class="text-lg">◷</span><span class="text-[10px] font-extrabold text-slate-300">{{ slot }} урок</span></div><div class="font-black text-sm leading-snug mb-auto relative z-20 text-slate-900">{{ curatorHourAt(day, slot).hour_type === 'information' ? 'Информационный час' : 'Кураторский час' }}</div><div class="text-[10px] font-bold text-amber-600 relative z-20">{{ curatorTeacherName(curatorHourAt(day, slot)) }} · Каб. {{ curatorRoomName(curatorHourAt(day, slot)) }}</div></div>
