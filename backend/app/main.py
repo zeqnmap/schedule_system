@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import List, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request as UrlRequest, urlopen
 from xml.sax.saxutils import escape
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
@@ -1997,19 +1997,28 @@ def broadcast_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, cap
     if not bot_url or not bot_secret:
         raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
     query = urlencode({"audience": audience, "filename": filename, "caption": caption})
-    request = UrlRequest(
-        f"{bot_url}/internal/broadcast-pdf?{query}",
-        data=pdf.getvalue(),
-        headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Бот не принял рассылку") from exc
-    except (URLError, TimeoutError) as exc:
-        raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from exc
+    bot_urls = [bot_url]
+    # The compose service name is resolvable only inside the shared Docker
+    # network. The same API is often started locally during administration,
+    # where the bot is exposed on localhost:8081 instead.
+    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
+        bot_urls.append("http://127.0.0.1:8081")
+    last_network_error = None
+    for candidate in dict.fromkeys(bot_urls):
+        request = UrlRequest(
+            f"{candidate}/internal/broadcast-pdf?{query}",
+            data=pdf.getvalue(),
+            headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise HTTPException(status_code=502, detail="Бот не принял рассылку") from exc
+        except (URLError, TimeoutError) as exc:
+            last_network_error = exc
+    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
 
 
 @app.post("/telegram/broadcast-schedule")
