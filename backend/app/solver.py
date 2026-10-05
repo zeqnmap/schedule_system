@@ -17,8 +17,15 @@ from . import models
 
 
 DAY_COUNT = 6
-SLOTS_PER_DAY = 6
+SLOTS_PER_DAY = 10
 MAX_LESSONS_PER_DAY = 9
+MAX_PAIRS_PER_DAY = 4
+GENERATED_SLOTS_PER_DAY = 8
+MIN_LESSONS_ON_STARTED_DAY = 4
+# This is deliberately below the value of one scheduled lesson, but far above
+# the secondary subject preferences.  It makes the first available lesson the
+# deterministic choice whenever moving it earlier does not create a conflict.
+EARLY_SLOT_WEIGHT = 10_000
 LESSON_MODES = {"auto", "lessons", "pairs", "pair_and_lesson"}
 NON_CLASSROOM_SUBJECTS = {"преддипломная", "технологическая"}
 
@@ -325,11 +332,13 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                     single[group.id, day, slot, demand.id] = model.NewBoolVar(
                         f"single_g{group.id}_d{day}_s{slot}_p{demand.id}"
                     )
-                # Keep the usual pair starts and allow one immediately after
-                # a curator hour when two slots remain before the third pair ends.
-                starts = list(range(0, SLOTS_PER_DAY - 1, 2))
+                # Automatic lessons use four conventional pairs: 1-2, 3-4,
+                # 5-6 and 7-8. A shifted start remains available immediately
+                # after a curator hour, but no generated lesson is placed
+                # after the eighth lesson.
+                starts = list(range(0, GENERATED_SLOTS_PER_DAY - 1, 2))
                 starts.extend(
-                    slot for slot in range(1, SLOTS_PER_DAY - 1)
+                    slot for slot in range(1, GENERATED_SLOTS_PER_DAY - 1)
                     if (group.id, day, slot - 1) in blocked and slot not in starts
                 )
                 pair_starts[group.id, day] = starts
@@ -341,6 +350,16 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
             singles = [single[group.id, day, slot, demand.id] for day in range(days) for slot in range(SLOTS_PER_DAY)]
             model.Add(sum(pairs) <= max_pairs)
             model.Add(sum(singles) <= max_singles)
+
+            # Prefer conventional pairs 1-2, 3-4 and 5-6. If a curator hour
+            # blocks one of these starts, the shifted pair remains available.
+            aligned_pairs = [
+                pair[group.id, day, start, demand.id]
+                for day in range(days)
+                for start in pair_starts[group.id, day]
+                if start % 2 == 0
+            ]
+            objective.append(50000 * sum(pairs) + 50000 * sum(aligned_pairs))
 
             # "Only lessons" means separate lessons, not several consecutive
             # lessons of the same subject on one day.  Spread the weekly load
@@ -380,11 +399,21 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                         if start == slot or start + 1 == slot
                     ]
                     model.Add(lesson[group.id, day, slot, demand.id] == sum(covering_pairs) + single[group.id, day, slot, demand.id])
+                    if slot >= GENERATED_SLOTS_PER_DAY:
+                        model.Add(lesson[group.id, day, slot, demand.id] == 0)
+                        model.Add(single[group.id, day, slot, demand.id] == 0)
                     if (group.id, day, slot) in blocked:
                         model.Add(lesson[group.id, day, slot, demand.id] == 0)
                     if not date_available(group, day):
                         model.Add(lesson[group.id, day, slot, demand.id] == 0)
-                    objective.append((100 - slot * 3) * lesson[group.id, day, slot, demand.id])
+                    # After the required load and resource safety, compress
+                    # the day towards lesson 1.  The old 3-point difference
+                    # was too small, so equivalent solutions could begin at
+                    # lesson 2 or later while lesson 1 was actually free.
+                    objective.append(
+                        (SLOTS_PER_DAY - slot) * EARLY_SLOT_WEIGHT
+                        * lesson[group.id, day, slot, demand.id]
+                    )
 
     for group in groups:
         days = days_by_group[group.id]
@@ -409,6 +438,26 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                     model.Add(start >= current - previous)
                 starts.append(start)
             model.Add(sum(starts) <= 1)
+
+            day_pairs = [
+                pair[group.id, day, start, demand.id]
+                for demand in group_demands[group.id]
+                for start in pair_starts[group.id, day]
+            ]
+            model.Add(sum(day_pairs) <= MAX_PAIRS_PER_DAY)
+
+            # A generated day is either empty or contains at least two full
+            # pairs. This prevents isolated one-lesson days while still
+            # allowing a day to remain empty when resources are unavailable.
+            if strict_load:
+                day_active = model.NewBoolVar(f"active_g{group.id}_d{day}")
+                generated_daily = sum(
+                    lesson[group.id, day, slot, demand.id]
+                    for slot in range(GENERATED_SLOTS_PER_DAY)
+                    for demand in group_demands[group.id]
+                )
+                model.Add(generated_daily >= MIN_LESSONS_ON_STARTED_DAY * day_active)
+                model.Add(generated_daily <= GENERATED_SLOTS_PER_DAY * day_active)
 
     # Build resource lists once. The old version repeatedly scanned every
     # group and plan for every teacher, room, day and slot.
@@ -504,20 +553,14 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
             if group_id == group.id and day < days_by_group[group.id]
         }
         requested = max(0, int(group.weekly_hours or 0) - len(reserved_slots))
-        capacity = days_by_group[group.id] * SLOTS_PER_DAY
+        capacity = days_by_group[group.id] * GENERATED_SLOTS_PER_DAY
         open_days = [day for day in range(days_by_group[group.id]) if date_available(group, day)]
         term = terms_by_group[group.id]
-        remaining_days = sum(
-            date_available(group, day, future_week)
-            for future_week in range(week, term.start_week + term.weeks)
-            for day in range(days_by_group[group.id])
-        )
-        paced_target = (available * len(open_days) + remaining_days - 1) // remaining_days if remaining_days else 0
-        # The group's own norm is the target. If it cannot fit in the
-        # selected number of days, preserve the nine-lessons-per-day limit.
-        # Pace remaining plan hours across the term instead of exhausting
-        # them in the first weeks and leaving later teaching days empty.
-        target = min(available, requested, max(0, capacity - len(reserved_slots)), paced_target)
+        # Fill as many lessons as this week's group norm and free capacity
+        # allow. The previous horizon pacing deliberately left available
+        # hours for later weeks, which made subjects such as PE stay at zero
+        # even when their teachers and sports rooms were free.
+        target = min(available, requested, max(0, capacity - len(reserved_slots)))
         total = sum(
             lesson[group.id, day, slot, demand.id]
             for day in range(days_by_group[group.id])
@@ -533,13 +576,15 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                 for demand in group_demands[group.id]
             )
             reserved_hours = sum((day, slot) in reserved_slots for slot in range(SLOTS_PER_DAY))
-            model.Add(daily <= min(MAX_LESSONS_PER_DAY, SLOTS_PER_DAY) - reserved_hours)
+            model.Add(daily <= MAX_LESSONS_PER_DAY - reserved_hours)
             daily_loads.append(daily)
         # Spread lessons across all available days when the target allows it.
-        # This is a hard minimum of one lesson, while the nine-lesson cap above
-        # remains the highest priority.
+        # This is a hard minimum only for the strict pass.  If a teacher or a
+        # room makes the requested weekly load impossible, the fallback must
+        # still build the largest safe partial schedule instead of failing the
+        # whole generation because one day cannot be covered.
         uncovered_days = [day for day in open_days if not any((group.id, day, slot) in fixed_group_slots for slot in range(SLOTS_PER_DAY))]
-        if uncovered_days and target >= len(uncovered_days):
+        if strict_load and uncovered_days and target >= len(uncovered_days):
             for day in uncovered_days:
                 model.Add(daily_loads[day] >= 1)
         # First consume all available subject hours; only then prefer the
@@ -569,7 +614,10 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
         strict_load, terms_by_group,
     )
     cp_solver = cp_model.CpSolver()
-    cp_solver.parameters.max_time_in_seconds = 3.0
+    # Ten lesson slots and the four-pair objective produce a larger model.
+    # Give CP-SAT enough time to find a feasible weekly layout before using
+    # the relaxed fallback.
+    cp_solver.parameters.max_time_in_seconds = 10.0
     cp_solver.parameters.num_search_workers = 8
     status = cp_solver.Solve(model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
