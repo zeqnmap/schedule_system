@@ -90,8 +90,8 @@ createApp({ setup() {
         const requestId = ++archiveRequestId;
         if (!groupId) { isArchived.value = false; isArchivedAll.value = false; return; }
         const [res, allRes] = await Promise.all([
-            fetch(`/archived-weeks/status?group_id=${groupId}&week_number=${week}`),
-            fetch(`/archived-weeks/status-all?week_number=${week}`),
+            fetch(`/archived-weeks/status?group_id=${groupId}&week_number=${week}&academic_year_id=${selectedAcademicYearId.value}`),
+            fetch(`/archived-weeks/status-all?week_number=${week}&academic_year_id=${selectedAcademicYearId.value}`),
         ]);
         const [groupStatus, allStatus] = await Promise.all([
             res.ok ? res.json() : null,
@@ -110,8 +110,8 @@ createApp({ setup() {
         if (res.ok) currentGroup.value.weekly_hours = (await res.json()).weekly_hours;
     };
     const toggleSaturdayForGroup = async () => { const res = await fetch(`/groups/${selectedGroupId.value}/toggle-saturday`, { method: 'POST' }); if (res.ok) { currentGroup.value.has_saturday = (await res.json()).has_saturday; await fetchSchedule(); } };
-    const toggleArchive = async () => { const res = await fetch('/archived-weeks/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selectedGroupId.value, week_number: selectedWeek.value }) }); if (res.ok) { isArchived.value = (await res.json()).is_archived; await fetchArchiveStatus(); } };
-    const toggleArchiveAll = async () => { const res = await fetch('/archived-weeks/toggle-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ week_number: selectedWeek.value }) }); if (res.ok) { const data = await res.json(); isArchivedAll.value = data.is_archived; await fetchArchiveStatus(); } };
+    const toggleArchive = async () => { const res = await fetch('/archived-weeks/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group_id: selectedGroupId.value, week_number: selectedWeek.value, academic_year_id: selectedAcademicYearId.value }) }); if (res.ok) { isArchived.value = (await res.json()).is_archived; await fetchArchiveStatus(); } };
+    const toggleArchiveAll = async () => { const res = await fetch('/archived-weeks/toggle-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ week_number: selectedWeek.value, academic_year_id: selectedAcademicYearId.value }) }); if (res.ok) { const data = await res.json(); isArchivedAll.value = data.is_archived; await fetchArchiveStatus(); } };
     const selectTerm = termId => {
         const term = currentGroupTerms.value.find(item => Number(item.id) === Number(termId));
         if (!term) return;
@@ -168,7 +168,7 @@ createApp({ setup() {
     const removeCuratorHourForAllGroups = async hour => {
         const title = hour.hour_type === 'information' ? 'Информационный' : 'Кураторский';
         if (!confirm(`Удалить «${title} час» ${hour.schedule_date} у всех групп? Это не затронет другие даты.`)) return;
-        const response = await fetch(`/curator-hours/${hour.source_id}/hide-for-all?schedule_date=${encodeURIComponent(hour.schedule_date)}`, { method: 'POST' });
+        const response = await fetch(`/curator-hours/${hour.source_id}/hide-for-all?schedule_date=${encodeURIComponent(hour.schedule_date)}&academic_year_id=${selectedAcademicYearId.value}`, { method: 'POST' });
         if (!response.ok) { const data = await response.json().catch(() => ({})); errorMessage.value = data.detail || 'Не удалось удалить час у всех групп'; return; }
         activeCardId.value = null; await loadCuratorOverrides();
     };

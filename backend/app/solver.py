@@ -695,8 +695,11 @@ def trigger_global_generation(
         return False, "ОШИБКИ В НАСТРОЙКАХ АЛГОРИТМА:\n" + "\n".join(errors)
 
     archived = {
-        (item.group_id, item.week_number)
-        for item in db.query(models.ArchivedWeek).filter_by(is_archived=True).all()
+        (item.group_id, item.week_number, item.academic_year_id)
+        for item in db.query(models.ArchivedWeek).filter(
+            models.ArchivedWeek.is_archived.is_(True),
+            models.ArchivedWeek.academic_year_id.in_({term.academic_year_id for term in unlocked_terms}),
+        ).all()
     }
     # A group may have one archived week and many open weeks. Delete only
     # rows belonging to open weeks; filtering by group alone would destroy the
@@ -706,7 +709,7 @@ def trigger_global_generation(
         models.ScheduleEntry.is_generated.is_(True),
         or_(models.ScheduleEntry.status == "planned", models.ScheduleEntry.status.is_(None))
     ).all():
-        if (entry.group_id, entry.week_number) not in archived:
+        if (entry.group_id, entry.week_number, entry.academic_year_id) not in archived:
             db.delete(entry)
     db.flush()
 
@@ -715,19 +718,22 @@ def trigger_global_generation(
         week for week in range(1, max_weeks + 1)
         if any(term.start_week <= week < term.start_week + term.weeks for term in unlocked_terms)
     ]
-    archived_by_week = {}
-    for group_id, week_number in archived:
-        archived_by_week.setdefault(week_number, set()).add(group_id)
     if progress:
         progress(0, len(weeks))
     for completed, week in enumerate(weeks, 1):
         terms_by_group = {term.group_id: term for term in unlocked_terms if term.start_week <= week < term.start_week + term.weeks}
         active_groups = [group for group in groups if group.id in terms_by_group]
         if active_groups:
+            archived_groups = {
+                group_id for group_id, archived_week, academic_year_id in archived
+                if archived_week == week
+                and terms_by_group.get(group_id)
+                and terms_by_group[group_id].academic_year_id == academic_year_id
+            }
             success, message = solve_global_week(
                 db, week, active_groups, teachers, rooms, course_plans, rules,
                 strict_load=True, terms_by_group=terms_by_group,
-                archived=archived_by_week.get(week, set()),
+                archived=archived_groups,
             )
             if not success:
                 return False, message

@@ -33,6 +33,11 @@ from sqlalchemy import or_, text, inspect
 from . import models, schemas, database, solver
 
 
+def common_curator_hour_filter():
+    """Support legacy zero and the nullable representation of a common hour."""
+    return or_(models.CuratorHour.group_id == 0, models.CuratorHour.group_id.is_(None))
+
+
 def calendar_week_for_date(year_start: date, target: date) -> int:
     """Return the Monday-based timetable week containing target."""
     year_monday = year_start - timedelta(days=year_start.isoweekday() - 1)
@@ -86,6 +91,14 @@ with database.engine.begin() as connection:
         connection.execute(text("ALTER TABLE groups ADD COLUMN curator_teacher_id INTEGER"))
     if "curator_room_name" not in group_columns:
         connection.execute(text("ALTER TABLE groups ADD COLUMN curator_room_name VARCHAR"))
+user_columns = {column["name"] for column in inspect(database.engine).get_columns("users")}
+with database.engine.begin() as connection:
+    if "role" not in user_columns:
+        connection.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR DEFAULT 'user' NOT NULL"))
+    # The legacy flag denoted the single owner. Preserve that account while
+    # converting all former planning accounts into read-only users.
+    connection.execute(text("UPDATE users SET role = CASE WHEN is_admin = 1 THEN 'owner' ELSE 'user' END WHERE role IS NULL OR role NOT IN ('owner', 'admin', 'user')"))
+    connection.execute(text("UPDATE users SET is_admin = CASE WHEN role = 'owner' THEN 1 ELSE 0 END"))
 term_columns = {column["name"] for column in inspect(database.engine).get_columns("group_terms")}
 with database.engine.begin() as connection:
     course_plan_columns = {column["name"] for column in inspect(database.engine).get_columns("course_plans")}
@@ -128,6 +141,11 @@ with database.engine.begin() as connection:
     connection.execute(text("UPDATE course_plans SET academic_year_id = (SELECT academic_year_id FROM group_terms WHERE group_terms.id = course_plans.term_id) WHERE academic_year_id IS NULL"))
     connection.execute(text("UPDATE schedule_entries SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = schedule_entries.group_id AND schedule_entries.week_number >= group_terms.start_week AND schedule_entries.week_number < group_terms.start_week + group_terms.weeks ORDER BY group_terms.term_number LIMIT 1) WHERE term_id IS NULL"))
     connection.execute(text("UPDATE schedule_entries SET academic_year_id = (SELECT academic_year_id FROM group_terms WHERE group_terms.id = schedule_entries.term_id) WHERE academic_year_id IS NULL"))
+    connection.execute(text("UPDATE curator_hours SET group_id = NULL WHERE group_id = 0"))
+    # Archive rows created before academic years were introduced belong to the
+    # then-active year. Without this backfill, the same week in a future year
+    # would be incorrectly locked too.
+    connection.execute(text("UPDATE archived_weeks SET academic_year_id = (SELECT id FROM academic_years WHERE is_active = 1 LIMIT 1) WHERE academic_year_id IS NULL"))
 
 # Convert legacy week-based rows once so calendar exclusions also remove
 # previously generated lessons, not only new ones.
@@ -150,6 +168,9 @@ app.add_middleware(
 
 SESSION_TTL = 60 * 60 * 12
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-this-session-secret")
+OWNER_ROLE = "owner"
+ADMIN_ROLE = "admin"
+USER_ROLE = "user"
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -193,10 +214,30 @@ def require_user(request: Request, db: Session = Depends(database.get_db)):
     return current_user(request, db)
 
 
+def user_role(user: models.User) -> str:
+    role = (user.role or "").strip().lower()
+    return role if role in {OWNER_ROLE, ADMIN_ROLE, USER_ROLE} else (OWNER_ROLE if user.is_admin else USER_ROLE)
+
+
+def can_manage_schedule(user: models.User) -> bool:
+    return user_role(user) in {OWNER_ROLE, ADMIN_ROLE}
+
+
+def is_owner(user: models.User) -> bool:
+    return user_role(user) == OWNER_ROLE
+
+
 def require_admin(request: Request, db: Session = Depends(database.get_db)):
     user = current_user(request, db)
-    if not user.is_admin:
+    if not can_manage_schedule(user):
         raise HTTPException(status_code=403, detail="Нужны права администратора")
+    return user
+
+
+def require_owner(request: Request, db: Session = Depends(database.get_db)):
+    user = current_user(request, db)
+    if not is_owner(user):
+        raise HTTPException(status_code=403, detail="Управление аккаунтами доступно только владельцу")
     return user
 
 
@@ -212,12 +253,16 @@ async def protect_site(request: Request, call_next):
                 "/teachers.html", "/groups_subjects.html", "/admin.html", "/progress.html", "/users.html", "/algorithm_settings.html",
                 "/vedomost.html", "/html/teachers.html", "/html/groups_subjects.html", "/html/admin.html", "/html/progress.html", "/html/vedomost.html", "/html/users.html", "/html/algorithm_settings.html",
             }
-            if request.url.path in admin_pages and not user.is_admin:
+            owner_pages = {"/users.html", "/html/users.html"}
+            if request.url.path in owner_pages and not is_owner(user):
                 return Response(status_code=307, headers={"Location": "/"})
-            admin_only = request.url.path.startswith("/users/") or (
-                request.method != "GET" and request.url.path.startswith(("/rooms/", "/teachers/", "/groups/", "/subjects/", "/course_plans/"))
-            )
-            if admin_only and not user.is_admin:
+            if request.url.path in admin_pages and not can_manage_schedule(user):
+                return Response(status_code=307, headers={"Location": "/"})
+            admin_only = request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in {"/auth/login", "/auth/logout"}
+            owner_only = request.url.path.startswith("/users/")
+            if owner_only and not is_owner(user):
+                return Response(content='{"detail":"Управление аккаунтами доступно только владельцу"}', status_code=403, media_type="application/json")
+            if admin_only and not can_manage_schedule(user):
                 return Response(content='{"detail":"Нужны права администратора"}', status_code=403, media_type="application/json")
         except HTTPException:
             if request.url.path.endswith(".html") or request.url.path == "/":
@@ -235,6 +280,7 @@ def bootstrap_admin():
             db.add(models.User(
                 login=os.getenv("ADMIN_LOGIN", "admin").strip(),
                 password_hash=hash_password(os.getenv("ADMIN_PASSWORD", "change-me-now")),
+                role=OWNER_ROLE,
                 is_admin=True,
             ))
             db.commit()
@@ -264,7 +310,7 @@ def login(data: schemas.LoginRequest, response: Response, db: Session = Depends(
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     response.set_cookie("schedule_session", make_session(user.id), httponly=True, samesite="lax", max_age=SESSION_TTL)
-    return {"login": user.login, "is_admin": user.is_admin}
+    return {"login": user.login, "role": user_role(user), "is_admin": is_owner(user)}
 
 
 @app.post("/auth/logout")
@@ -275,16 +321,16 @@ def logout(response: Response):
 
 @app.get("/auth/me")
 def me(user: models.User = Depends(require_user)):
-    return {"id": user.id, "login": user.login, "is_admin": user.is_admin, "is_active": user.is_active}
+    return {"id": user.id, "login": user.login, "role": user_role(user), "is_admin": is_owner(user), "is_active": user.is_active}
 
 
 @app.get("/users/", response_model=List[schemas.UserOut])
-def read_users(_: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+def read_users(_: models.User = Depends(require_owner), db: Session = Depends(database.get_db)):
     return db.query(models.User).order_by(models.User.login).all()
 
 
 @app.post("/users/", response_model=schemas.UserOut)
-def create_user(data: schemas.UserCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+def create_user(data: schemas.UserCreate, _: models.User = Depends(require_owner), db: Session = Depends(database.get_db)):
     login_name = data.login.strip()
     if not login_name or not data.password:
         raise HTTPException(status_code=400, detail="Логин и пароль обязательны")
@@ -292,7 +338,7 @@ def create_user(data: schemas.UserCreate, _: models.User = Depends(require_admin
         raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 8 символов")
     if db.query(models.User).filter_by(login=login_name).first():
         raise HTTPException(status_code=409, detail="Такой логин уже существует")
-    user = models.User(login=login_name, password_hash=hash_password(data.password), is_admin=False)
+    user = models.User(login=login_name, password_hash=hash_password(data.password), role=data.role, is_admin=False)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -300,29 +346,37 @@ def create_user(data: schemas.UserCreate, _: models.User = Depends(require_admin
 
 
 @app.delete("/users/{user_id}")
-def delete_user(user_id: int, current: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+def delete_user(user_id: int, current: models.User = Depends(require_owner), db: Session = Depends(database.get_db)):
     if user_id == current.id:
-        raise HTTPException(status_code=400, detail="Нельзя удалить текущего администратора")
-    db.query(models.User).filter_by(id=user_id).delete()
+        raise HTTPException(status_code=400, detail="Нельзя удалить текущего владельца")
+    user = db.query(models.User).filter_by(id=user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Аккаунт не найден")
+    if is_owner(user):
+        raise HTTPException(status_code=400, detail="Владельца нельзя удалить")
+    db.delete(user)
     db.commit()
     return {"ok": True}
 
 
 @app.put("/users/{user_id}", response_model=schemas.UserOut)
-def update_user(user_id: int, data: schemas.UserUpdate, current: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+def update_user(user_id: int, data: schemas.UserUpdate, current: models.User = Depends(require_owner), db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter_by(id=user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
     if user.id == current.id and data.is_active is False:
         raise HTTPException(status_code=400, detail="Нельзя отключить собственный аккаунт")
+    if is_owner(user) and user.id != current.id:
+        raise HTTPException(status_code=400, detail="Нельзя изменять другого владельца")
     if data.password:
         if len(data.password) < 8:
             raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 8 символов")
         user.password_hash = hash_password(data.password)
     if data.is_active is not None:
         user.is_active = data.is_active
-    if data.is_admin is True and user.id != current.id:
-        raise HTTPException(status_code=400, detail="Полный доступ владельца нельзя передать другому пользователю")
+    if data.role is not None:
+        user.role = data.role
+        user.is_admin = False
     db.commit()
     db.refresh(user)
     return user
@@ -344,8 +398,20 @@ def read_rooms(skip: int = 0, limit: int = 100, db: Session = Depends(database.g
 
 
 @app.delete("/rooms/{room_id}")
-def delete_room(room_id: int, db: Session = Depends(database.get_db)):
-    db.query(models.Room).filter(models.Room.id == room_id).delete()
+def delete_room(room_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    if not db.query(models.Room).filter_by(id=room_id).first():
+        raise HTTPException(status_code=404, detail="Кабинет не найден")
+    if db.query(models.Teacher).filter_by(room_id=room_id).first():
+        raise HTTPException(status_code=409, detail="Кабинет назначен преподавателю")
+    room = db.query(models.Room).filter_by(id=room_id).first()
+    room_name = room.name.strip()
+    if db.query(models.CoursePlan).filter(or_(models.CoursePlan.room_name == room_name, models.CoursePlan.room2_name == room_name)).first():
+        raise HTTPException(status_code=409, detail="Кабинет используется в учебном плане")
+    if db.query(models.ScheduleEntry).filter(or_(models.ScheduleEntry.room_name == room_name, models.ScheduleEntry.room2_name == room_name)).first():
+        raise HTTPException(status_code=409, detail="Кабинет используется в расписании")
+    if db.query(models.Group).filter_by(curator_room_name=room_name).first() or db.query(models.CuratorHour).filter_by(room_name=room_name).first() or db.query(models.GroupCuratorHourOverride).filter_by(room_name=room_name).first():
+        raise HTTPException(status_code=409, detail="Кабинет используется кураторским или информационным часом")
+    db.delete(room)
     db.commit()
     return {"ok": True}
 
@@ -373,8 +439,10 @@ def read_teachers(skip: int = 0, limit: int = 100, db: Session = Depends(databas
 
 
 @app.put("/teachers/{teacher_id}", response_model=schemas.TeacherOut)
-def update_teacher(teacher_id: int, teacher_data: schemas.TeacherCreate, db: Session = Depends(database.get_db)):
+def update_teacher(teacher_id: int, teacher_data: schemas.TeacherCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Преподаватель не найден")
     for key, value in teacher_data.dict().items(): setattr(teacher, key, value)
     db.commit()
     db.refresh(teacher)
@@ -444,6 +512,73 @@ def group_has_classes_on_date(db: Session, group_id: int, academic_year_id: Opti
     ).first()
 
 
+def validate_curator_override_conflicts(
+    db: Session,
+    group_id: int,
+    hour: models.CuratorHour,
+    academic_year_id: int,
+    schedule_date: date,
+    teacher_id: Optional[int],
+    room_name: Optional[str],
+    is_hidden: bool,
+):
+    """Check the effective curator slot against lessons and every other curator slot."""
+    if is_hidden:
+        return
+    if teacher_id:
+        teacher = db.query(models.Teacher).filter_by(id=teacher_id).first()
+        if not teacher:
+            raise HTTPException(status_code=404, detail="Преподаватель не найден")
+        if not teacher_works_on_day(teacher, schedule_date.isoweekday()):
+            raise HTTPException(status_code=409, detail="Преподаватель не работает в выбранный день")
+        if is_teacher_on_date_vacation(teacher_id, academic_year_id, schedule_date, db):
+            raise HTTPException(status_code=409, detail="Преподаватель находится в отпуске в выбранную дату")
+
+    overrides = {
+        (item.group_id, item.curator_hour_id): item
+        for item in db.query(models.GroupCuratorHourOverride).filter_by(schedule_date=schedule_date).all()
+    }
+    all_group_ids = [row[0] for row in db.query(models.Group.id).all()]
+    normalized_room = room_name.strip() if room_name else None
+
+    for offset in range(hour.duration):
+        slot = hour.time_slot + offset
+        entries = db.query(models.ScheduleEntry).filter(
+            models.ScheduleEntry.academic_year_id == academic_year_id,
+            models.ScheduleEntry.schedule_date == schedule_date,
+            models.ScheduleEntry.time_slot == slot,
+            models.ScheduleEntry.status != "canceled",
+        ).all()
+        if teacher_id and any(teacher_id in {entry.teacher_id, entry.teacher2_id} for entry in entries):
+            raise HTTPException(status_code=409, detail="Преподаватель уже занят в этот день и урок")
+        if normalized_room and normalized_room != "Без кабинета" and any(normalized_room in entry_room_names(entry) for entry in entries):
+            raise HTTPException(status_code=409, detail="Кабинет уже занят в этот день и урок")
+
+        same_time_hours = db.query(models.CuratorHour).filter(
+            models.CuratorHour.is_active.is_(True),
+            models.CuratorHour.day_of_week == schedule_date.isoweekday(),
+            models.CuratorHour.time_slot <= slot,
+            models.CuratorHour.time_slot + models.CuratorHour.duration > slot,
+        ).all()
+        for other_hour in same_time_hours:
+            target_group_ids = all_group_ids if not other_hour.group_id else [other_hour.group_id]
+            for other_group_id in target_group_ids:
+                if other_hour.id == hour.id and other_group_id == group_id:
+                    continue
+                if not group_has_classes_on_date(db, other_group_id, academic_year_id, schedule_date):
+                    continue
+                override = overrides.get((other_group_id, other_hour.id))
+                if override and override.is_hidden:
+                    continue
+                other_group = db.query(models.Group).filter_by(id=other_group_id).first()
+                other_teacher_id = override.teacher_id if override and override.teacher_id is not None else (other_hour.teacher_id or other_group.curator_teacher_id)
+                other_room = override.room_name if override and override.room_name is not None else (other_hour.room_name or other_group.curator_room_name)
+                if teacher_id and teacher_id == other_teacher_id:
+                    raise HTTPException(status_code=409, detail="Этот преподаватель уже занят кураторским или информационным часом")
+                if normalized_room and normalized_room != "Без кабинета" and other_room and normalized_room == other_room.strip():
+                    raise HTTPException(status_code=409, detail="Этот кабинет уже занят кураторским или информационным часом")
+
+
 @app.get("/teacher-vacations/", response_model=List[schemas.TeacherVacationOut])
 def read_teacher_vacations(teacher_id: Optional[int] = None, academic_year_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     query = db.query(models.TeacherVacation)
@@ -477,8 +612,19 @@ def delete_teacher_vacation(vacation_id: int, _: models.User = Depends(require_a
 
 
 @app.delete("/teachers/{teacher_id}")
-def delete_teacher(teacher_id: int, db: Session = Depends(database.get_db)):
-    db.query(models.Teacher).filter(models.Teacher.id == teacher_id).delete()
+def delete_teacher(teacher_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    teacher = db.query(models.Teacher).filter_by(id=teacher_id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Преподаватель не найден")
+    if db.query(models.CoursePlan).filter(or_(models.CoursePlan.teacher_id == teacher_id, models.CoursePlan.teacher2_id == teacher_id)).first():
+        raise HTTPException(status_code=409, detail="Преподаватель используется в учебном плане")
+    if db.query(models.ScheduleEntry).filter(or_(models.ScheduleEntry.teacher_id == teacher_id, models.ScheduleEntry.teacher2_id == teacher_id)).first():
+        raise HTTPException(status_code=409, detail="Преподаватель используется в расписании")
+    if db.query(models.CuratorHour).filter_by(teacher_id=teacher_id).first() or db.query(models.Group).filter_by(curator_teacher_id=teacher_id).first() or db.query(models.GroupCuratorHourOverride).filter_by(teacher_id=teacher_id).first():
+        raise HTTPException(status_code=409, detail="Преподаватель назначен куратором")
+    if db.query(models.TeacherVacation).filter_by(teacher_id=teacher_id).first():
+        raise HTTPException(status_code=409, detail="Для преподавателя указан период отпуска")
+    db.delete(teacher)
     db.commit()
     return {"ok": True}
 
@@ -691,7 +837,7 @@ def delete_group_break_day(break_day_id: int, _: models.User = Depends(require_a
 
 
 @app.post("/groups/", response_model=schemas.GroupOut)
-def create_group(group: schemas.GroupCreate, db: Session = Depends(database.get_db)):
+def create_group(group: schemas.GroupCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     validate_group_curator_assignment(None, group.curator_teacher_id, group.curator_room_name, db)
     db_group = models.Group(**group.dict())
     db.add(db_group)
@@ -702,12 +848,12 @@ def create_group(group: schemas.GroupCreate, db: Session = Depends(database.get_
 
 
 @app.get("/groups/", response_model=List[schemas.GroupOut])
-def read_groups(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
+def read_groups(skip: int = 0, limit: int = 100, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
     return db.query(models.Group).offset(skip).limit(limit).all()
 
 
 @app.post("/groups/schedule-settings/", response_model=List[schemas.GroupOut])
-def update_group_schedule_settings(settings: List[schemas.GroupScheduleSetting], db: Session = Depends(database.get_db)):
+def update_group_schedule_settings(settings: List[schemas.GroupScheduleSetting], _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     ids = [setting.group_id for setting in settings]
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=400, detail="Группа указана несколько раз")
@@ -724,7 +870,7 @@ def update_group_schedule_settings(settings: List[schemas.GroupScheduleSetting],
 
 
 @app.put("/groups/{group_id}", response_model=schemas.GroupOut)
-def update_group(group_id: int, group_data: schemas.GroupCreate, db: Session = Depends(database.get_db)):
+def update_group(group_id: int, group_data: schemas.GroupCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Группа не найдена")
@@ -769,7 +915,7 @@ def validate_group_curator_assignment(group_id: int, teacher_id: Optional[int], 
         raise HTTPException(status_code=404, detail="Куратор не найден")
     room_name = (room_name or "").strip() or None
     slots = db.query(models.CuratorHour).filter(
-        models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])
+        models.CuratorHour.is_active.is_(True), common_curator_hour_filter()
     ).all()
     for slot in slots:
         occupied_entries = db.query(models.ScheduleEntry).filter(
@@ -802,15 +948,24 @@ def update_group_curator_assignment(group_id: int, data: dict, _: models.User = 
 
 
 @app.delete("/groups/{group_id}")
-def delete_group(group_id: int, db: Session = Depends(database.get_db)):
-    db.query(models.Group).filter(models.Group.id == group_id).delete()
+def delete_group(group_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    group = db.query(models.Group).filter_by(id=group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
+    if db.query(models.CoursePlan).filter_by(group_id=group_id).first() or db.query(models.ScheduleEntry).filter_by(group_id=group_id).first():
+        raise HTTPException(status_code=409, detail="Группа используется в учебных планах или расписании")
+    if db.query(models.GroupTerm).filter_by(group_id=group_id).first() or db.query(models.GroupBreakDay).filter_by(group_id=group_id).first() or db.query(models.ArchivedWeek).filter_by(group_id=group_id).first() or db.query(models.GroupCuratorHourOverride).filter_by(group_id=group_id).first() or db.query(models.CuratorHour).filter_by(group_id=group_id).first():
+        raise HTTPException(status_code=409, detail="Группа используется в настройках учебного периода или кураторских часах")
+    db.delete(group)
     db.commit()
     return {"ok": True}
 
 
 @app.post("/groups/{group_id}/toggle-saturday")
-def toggle_group_saturday(group_id: int, db: Session = Depends(database.get_db)):
+def toggle_group_saturday(group_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
     group.has_saturday = not bool(group.has_saturday)
     db.commit()
     db.refresh(group)
@@ -818,8 +973,10 @@ def toggle_group_saturday(group_id: int, db: Session = Depends(database.get_db))
 
 
 @app.post("/groups/{group_id}/set-weekly-hours")
-def set_group_weekly_hours(group_id: int, payload: dict, db: Session = Depends(database.get_db)):
+def set_group_weekly_hours(group_id: int, payload: dict, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
     group.weekly_hours = max(1, min(54, int(payload.get("weekly_hours", 30))))
     db.commit()
     db.refresh(group)
@@ -906,6 +1063,8 @@ def delete_group_term(term_id: int, _: models.User = Depends(require_admin), db:
     term = db.query(models.GroupTerm).filter_by(id=term_id).first()
     if not term: raise HTTPException(status_code=404, detail="Семестр не найден")
     if term.is_locked: raise HTTPException(status_code=409, detail="Завершённый семестр нельзя удалить")
+    if db.query(models.CoursePlan).filter_by(term_id=term_id).first() or db.query(models.ScheduleEntry).filter_by(term_id=term_id).first():
+        raise HTTPException(status_code=409, detail="Семестр используется в учебных планах или расписании")
     db.delete(term); db.commit()
     return {"ok": True}
 
@@ -1068,7 +1227,7 @@ def delete_algorithm_rule(rule_id: int, _: models.User = Depends(require_admin),
 
 @app.get("/curator-hours/", response_model=List[schemas.CuratorHourOut])
 def read_curator_hours(_: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
-    return db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).order_by(models.CuratorHour.day_of_week, models.CuratorHour.time_slot).all()
+    return db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), common_curator_hour_filter()).order_by(models.CuratorHour.day_of_week, models.CuratorHour.time_slot).all()
 
 
 @app.get("/group-curator-hour-overrides/", response_model=List[schemas.GroupCuratorHourOverrideOut])
@@ -1082,15 +1241,28 @@ def save_group_curator_hour_override(group_id: int, curator_hour_id: int, data: 
     hour = db.query(models.CuratorHour).filter(
         models.CuratorHour.id == curator_hour_id,
         models.CuratorHour.is_active.is_(True),
-        models.CuratorHour.group_id.in_([0, None]),
+        common_curator_hour_filter(),
     ).first()
     if not group or not hour:
         raise HTTPException(status_code=404, detail="Группа или общий час не найдены")
     if data.schedule_date.isoweekday() != hour.day_of_week:
         raise HTTPException(status_code=400, detail="Дата не соответствует дню этого часа")
-    if data.teacher_id is not None and not db.query(models.Teacher).filter_by(id=data.teacher_id).first():
-        raise HTTPException(status_code=404, detail="Преподаватель не найден")
     room_name = (data.room_name or "").strip() or None
+    term = db.query(models.GroupTerm).filter(
+        models.GroupTerm.group_id == group_id,
+        models.GroupTerm.start_date <= data.schedule_date,
+        models.GroupTerm.end_date >= data.schedule_date,
+        models.GroupTerm.is_active.is_(True),
+    ).first()
+    if not term:
+        raise HTTPException(status_code=409, detail="Дата находится вне семестра группы")
+    ensure_week_editable(group_id, calendar_week_for_date(
+        db.query(models.AcademicYear).filter_by(id=term.academic_year_id).one().start_date, data.schedule_date
+    ), term.academic_year_id, db)
+    validate_curator_override_conflicts(
+        db, group_id, hour, term.academic_year_id, data.schedule_date,
+        data.teacher_id, room_name, data.is_hidden,
+    )
     item = db.query(models.GroupCuratorHourOverride).filter_by(
         group_id=group_id, curator_hour_id=curator_hour_id, schedule_date=data.schedule_date
     ).first()
@@ -1105,12 +1277,12 @@ def save_group_curator_hour_override(group_id: int, curator_hour_id: int, data: 
 
 
 @app.post("/curator-hours/{curator_hour_id}/hide-for-all")
-def hide_curator_hour_for_all_groups(curator_hour_id: int, schedule_date: date, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+def hide_curator_hour_for_all_groups(curator_hour_id: int, schedule_date: date, academic_year_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     """Hide one occurrence of a common curator hour for every group."""
     hour = db.query(models.CuratorHour).filter(
         models.CuratorHour.id == curator_hour_id,
         models.CuratorHour.is_active.is_(True),
-        models.CuratorHour.group_id.in_([0, None]),
+        common_curator_hour_filter(),
     ).first()
     if not hour:
         raise HTTPException(status_code=404, detail="Общий кураторский час не найден")
@@ -1118,6 +1290,12 @@ def hide_curator_hour_for_all_groups(curator_hour_id: int, schedule_date: date, 
         raise HTTPException(status_code=400, detail="Дата не соответствует дню этого часа")
 
     group_ids = [group_id for group_id, in db.query(models.Group.id).all()]
+    year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first()
+    if not year:
+        raise HTTPException(status_code=404, detail="Учебный год не найден")
+    week_number = calendar_week_for_date(year.start_date, schedule_date)
+    for group_id in group_ids:
+        ensure_week_editable(group_id, week_number, academic_year_id, db)
     overrides = {
         item.group_id: item
         for item in db.query(models.GroupCuratorHourOverride).filter_by(
@@ -1144,19 +1322,19 @@ def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depend
         raise HTTPException(status_code=400, detail="Выберите корректный день, урок и длительность 1 или 2 урока")
     if data.duration == 2 and data.time_slot == 12:
         raise HTTPException(status_code=400, detail="Для двух уроков нужен не последний слот")
-    group_id = data.group_id if data.group_id is not None else 0
+    group_id = data.group_id
+    is_common = group_id is None
     if data.hour_type not in {"curator", "information"}:
         raise HTTPException(status_code=400, detail="Неизвестный тип часа")
-    if group_id != 0 and not db.query(models.Group).filter_by(id=group_id).first():
+    if not is_common and not db.query(models.Group).filter_by(id=group_id).first():
         raise HTTPException(status_code=404, detail="Группа не найдена")
-    if group_id != 0 and data.teacher_id is None:
+    if not is_common and data.teacher_id is None:
         raise HTTPException(status_code=400, detail="Для группового кураторского часа выберите куратора")
-    if group_id != 0 and not (data.room_name or "").strip():
+    if not is_common and not (data.room_name or "").strip():
         raise HTTPException(status_code=400, detail="Для группового кураторского часа выберите кабинет")
     for slot in range(data.time_slot, data.time_slot + data.duration):
-        conflict_groups = [0, group_id] if group_id == 0 else [group_id]
         exists = db.query(models.CuratorHour).filter(
-            models.CuratorHour.group_id.in_(conflict_groups),
+            common_curator_hour_filter() if is_common else or_(common_curator_hour_filter(), models.CuratorHour.group_id == group_id),
             models.CuratorHour.day_of_week == data.day_of_week,
             models.CuratorHour.is_active.is_(True),
             models.CuratorHour.time_slot <= slot,
@@ -1164,10 +1342,10 @@ def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depend
         ).first()
         if exists:
             raise HTTPException(status_code=409, detail="Этот слот уже занят кураторским часом")
-        if group_id != 0:
+        if not is_common:
             same_time = db.query(models.CuratorHour).filter(
                 models.CuratorHour.group_id != group_id,
-                models.CuratorHour.group_id != 0,
+                models.CuratorHour.group_id.is_not(None),
                 models.CuratorHour.day_of_week == data.day_of_week,
                 models.CuratorHour.time_slot <= slot,
                 models.CuratorHour.time_slot + models.CuratorHour.duration > slot,
@@ -1190,15 +1368,16 @@ def update_curator_hour(item_id: int, data: schemas.CuratorHourCreate, _: models
     item = db.query(models.CuratorHour).filter_by(id=item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Кураторский час не найден")
-    group_id = data.group_id if data.group_id is not None else item.group_id or 0
+    group_id = data.group_id if data.group_id is not None else item.group_id
+    is_common = group_id is None
     if data.hour_type not in {"curator", "information"}:
         raise HTTPException(status_code=400, detail="Неизвестный тип часа")
-    if group_id != 0 and (data.teacher_id is None or not (data.room_name or "").strip()):
+    if not is_common and (data.teacher_id is None or not (data.room_name or "").strip()):
         raise HTTPException(status_code=400, detail="Для группового кураторского часа выберите куратора и кабинет")
     for slot in range(data.time_slot, data.time_slot + data.duration):
         exists = db.query(models.CuratorHour).filter(
             models.CuratorHour.id != item_id,
-            models.CuratorHour.group_id.in_([0] if group_id == 0 else [group_id]),
+            common_curator_hour_filter() if is_common else or_(common_curator_hour_filter(), models.CuratorHour.group_id == group_id),
             models.CuratorHour.day_of_week == data.day_of_week,
             models.CuratorHour.is_active.is_(True),
             models.CuratorHour.time_slot <= slot,
@@ -1206,10 +1385,10 @@ def update_curator_hour(item_id: int, data: schemas.CuratorHourCreate, _: models
         ).first()
         if exists:
             raise HTTPException(status_code=409, detail="Этот слот уже занят кураторским часом")
-        if group_id != 0:
+        if not is_common:
             same_time = db.query(models.CuratorHour).filter(
                 models.CuratorHour.id != item_id,
-                models.CuratorHour.group_id != 0,
+                models.CuratorHour.group_id.is_not(None),
                 models.CuratorHour.day_of_week == data.day_of_week,
                 models.CuratorHour.time_slot <= slot,
                 models.CuratorHour.time_slot + models.CuratorHour.duration > slot,
@@ -1230,49 +1409,63 @@ def update_curator_hour(item_id: int, data: schemas.CuratorHourCreate, _: models
 def delete_curator_hour(item_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     item = db.query(models.CuratorHour).filter_by(id=item_id).first()
     if not item: raise HTTPException(status_code=404, detail="Кураторский час не найден")
+    if db.query(models.GroupCuratorHourOverride).filter_by(curator_hour_id=item_id).first():
+        raise HTTPException(status_code=409, detail="Для этого часа сохранены изменения по группам")
     db.delete(item); db.commit(); return {"ok": True}
 
 
 # ----------------- АРХИВЫ И ГЕНЕРАЦИЯ -----------------
 @app.get("/archived-weeks/status")
-def get_archive_status(group_id: int, week_number: int, db: Session = Depends(database.get_db)):
-    record = db.query(models.ArchivedWeek).filter_by(group_id=group_id, week_number=week_number).first()
+def get_archive_status(group_id: int, week_number: int, academic_year_id: int, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
+    record = db.query(models.ArchivedWeek).filter_by(
+        group_id=group_id, week_number=week_number, academic_year_id=academic_year_id
+    ).first()
     return {"is_archived": record.is_archived if record else False}
 
 @app.get("/archived-weeks/status-all")
-def get_archive_status_all(week_number: int, db: Session = Depends(database.get_db)):
+def get_archive_status_all(week_number: int, academic_year_id: int, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
     """Return whether the selected week is locked for every current group."""
     group_ids = [row[0] for row in db.query(models.Group.id).all()]
     if not group_ids:
         return {"is_archived": False, "archived_count": 0, "total_groups": 0}
     archived_count = db.query(models.ArchivedWeek).filter(
         models.ArchivedWeek.week_number == week_number,
+        models.ArchivedWeek.academic_year_id == academic_year_id,
         models.ArchivedWeek.group_id.in_(group_ids),
         models.ArchivedWeek.is_archived.is_(True),
     ).count()
     return {"is_archived": archived_count == len(group_ids), "archived_count": archived_count, "total_groups": len(group_ids)}
 
 @app.post("/archived-weeks/toggle")
-def toggle_archive(data: schemas.ArchivedWeekToggle, db: Session = Depends(database.get_db)):
-    record = db.query(models.ArchivedWeek).filter_by(group_id=data.group_id, week_number=data.week_number).first()
+def toggle_archive(data: schemas.ArchivedWeekToggle, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    if not db.query(models.AcademicYear).filter_by(id=data.academic_year_id).first():
+        raise HTTPException(status_code=404, detail="Учебный год не найден")
+    record = db.query(models.ArchivedWeek).filter_by(
+        group_id=data.group_id, week_number=data.week_number, academic_year_id=data.academic_year_id
+    ).first()
     if record: record.is_archived = not record.is_archived
-    else: db.add(models.ArchivedWeek(group_id=data.group_id, week_number=data.week_number, is_archived=True))
+    else: db.add(models.ArchivedWeek(group_id=data.group_id, week_number=data.week_number, academic_year_id=data.academic_year_id, is_archived=True))
     db.commit()
     return {"is_archived": record.is_archived if record else True}
 
-def ensure_week_editable(group_id: int, week_number: int, db: Session):
-    record = db.query(models.ArchivedWeek).filter_by(group_id=group_id, week_number=week_number).first()
+def ensure_week_editable(group_id: int, week_number: int, academic_year_id: Optional[int], db: Session):
+    if academic_year_id is None:
+        raise HTTPException(status_code=400, detail="Для изменения расписания укажите учебный год")
+    record = db.query(models.ArchivedWeek).filter_by(
+        group_id=group_id, week_number=week_number, academic_year_id=academic_year_id
+    ).first()
     if record and record.is_archived:
         raise HTTPException(status_code=423, detail="Эта неделя заблокирована для изменений")
 
 @app.post("/archived-weeks/toggle-all")
-def toggle_archive_all(data: schemas.ArchivedWeekAllToggle, db: Session = Depends(database.get_db)):
+def toggle_archive_all(data: schemas.ArchivedWeekAllToggle, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     """Lock/unlock one week for every group atomically."""
     group_ids = [row[0] for row in db.query(models.Group.id).all()]
     if not group_ids:
         return {"is_archived": False, "archived_count": 0, "total_groups": 0}
     records = db.query(models.ArchivedWeek).filter(
         models.ArchivedWeek.week_number == data.week_number,
+        models.ArchivedWeek.academic_year_id == data.academic_year_id,
         models.ArchivedWeek.group_id.in_(group_ids),
     ).all()
     by_group = {record.group_id: record for record in records}
@@ -1283,7 +1476,7 @@ def toggle_archive_all(data: schemas.ArchivedWeekAllToggle, db: Session = Depend
         if record:
             record.is_archived = target_state
         else:
-            db.add(models.ArchivedWeek(group_id=group_id, week_number=data.week_number, is_archived=target_state))
+            db.add(models.ArchivedWeek(group_id=group_id, week_number=data.week_number, academic_year_id=data.academic_year_id, is_archived=target_state))
     db.commit()
     return {"is_archived": target_state, "archived_count": len(group_ids) if target_state else 0, "total_groups": len(group_ids)}
 
@@ -1463,7 +1656,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
     year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first() if academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
     academic_year_id = year.id if year else academic_year_id
-    curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
+    curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), common_curator_hour_filter()).all()
     curator_overrides = {
         (item.group_id, item.curator_hour_id, item.schedule_date): item
         for item in db.query(models.GroupCuratorHourOverride).all()
@@ -1627,7 +1820,7 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
     year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first() if academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
     academic_year_id = year.id if year else academic_year_id
-    curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), models.CuratorHour.group_id.in_([0, None])).all()
+    curator_hours = db.query(models.CuratorHour).filter(models.CuratorHour.is_active.is_(True), common_curator_hour_filter()).all()
     curator_overrides = {
         (item.group_id, item.curator_hour_id, item.schedule_date): item
         for item in db.query(models.GroupCuratorHourOverride).all()
@@ -2140,7 +2333,7 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
         if is_teacher_on_date_vacation(teacher.id, data.academic_year_id, target_date, db):
             raise HTTPException(status_code=409, detail=f"Преподаватель {teacher.name} находится в отпуске в эту дату")
     blocked_hours = db.query(models.CuratorHour).filter(
-        models.CuratorHour.group_id.in_([0, data.group_id]),
+        or_(common_curator_hour_filter(), models.CuratorHour.group_id == data.group_id),
         models.CuratorHour.day_of_week == data.day_of_week,
         models.CuratorHour.is_active.is_(True),
         models.CuratorHour.time_slot <= data.time_slot,
@@ -2213,11 +2406,11 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
             raise HTTPException(status_code=409, detail="В одном спортивном зале одновременно допустимы максимум две группы")
 
 @app.post("/schedule/", response_model=schemas.ScheduleEntryOut)
-def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session = Depends(database.get_db)):
-    ensure_week_editable(entry_data.group_id, entry_data.week_number, db)
+def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     if entry_data.term_id:
         term = db.query(models.GroupTerm).filter_by(id=entry_data.term_id, group_id=entry_data.group_id).first()
         if term: entry_data.academic_year_id = term.academic_year_id
+    ensure_week_editable(entry_data.group_id, entry_data.week_number, entry_data.academic_year_id, db)
     entry_data.schedule_date = entry_calendar_date(entry_data, db)
     validate_schedule_conflicts(entry_data, db)
     new_entry = models.ScheduleEntry(**entry_data.dict())
@@ -2227,15 +2420,15 @@ def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, db: Session =
     return new_entry
 
 @app.put("/schedule/{entry_id}", response_model=schemas.ScheduleEntryOut)
-def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdate, db: Session = Depends(database.get_db)):
+def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Занятие не найдено")
-    ensure_week_editable(entry.group_id, entry.week_number, db)
-    ensure_week_editable(update_data.group_id, update_data.week_number, db)
+    ensure_week_editable(entry.group_id, entry.week_number, entry.academic_year_id, db)
     if update_data.term_id:
         term = db.query(models.GroupTerm).filter_by(id=update_data.term_id, group_id=update_data.group_id).first()
         if term: update_data.academic_year_id = term.academic_year_id
+    ensure_week_editable(update_data.group_id, update_data.week_number, update_data.academic_year_id, db)
     update_data.schedule_date = entry_calendar_date(update_data, db)
     validate_schedule_conflicts(update_data, db, exclude_entry_id=entry_id)
     for key, value in update_data.dict().items(): setattr(entry, key, value)
@@ -2245,22 +2438,22 @@ def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdat
     return entry
 
 @app.delete("/schedule/{entry_id}")
-def delete_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
+def delete_schedule_entry(entry_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Занятие не найдено")
-    ensure_week_editable(entry.group_id, entry.week_number, db)
+    ensure_week_editable(entry.group_id, entry.week_number, entry.academic_year_id, db)
     db.delete(entry)
     db.commit()
     return {"ok": True}
 
 # --- НОВЫЕ ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ БОЛЕЗНЯМИ ---
 @app.post("/schedule/{entry_id}/cancel", response_model=schemas.ScheduleEntryOut)
-def cancel_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
+def cancel_schedule_entry(entry_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Занятие не найдено")
-    ensure_week_editable(entry.group_id, entry.week_number, db)
+    ensure_week_editable(entry.group_id, entry.week_number, entry.academic_year_id, db)
     entry.status = "canceled"
     entry.is_generated = False
     db.commit()
@@ -2268,11 +2461,11 @@ def cancel_schedule_entry(entry_id: int, db: Session = Depends(database.get_db))
     return entry
 
 @app.post("/schedule/{entry_id}/restore", response_model=schemas.ScheduleEntryOut)
-def restore_schedule_entry(entry_id: int, db: Session = Depends(database.get_db)):
+def restore_schedule_entry(entry_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Занятие не найдено")
-    ensure_week_editable(entry.group_id, entry.week_number, db)
+    ensure_week_editable(entry.group_id, entry.week_number, entry.academic_year_id, db)
     entry.status = "planned"
     entry.is_generated = False
     db.commit()

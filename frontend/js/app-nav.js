@@ -28,18 +28,22 @@
 
     const current = location.pathname.split('/').pop() || 'index.html';
     const pages = [
-        ['groups_subjects.html', 'Справочники', 'admin'],
-        ['academic_years.html', 'Учебные годы', 'admin'],
-        ['teachers.html', 'Преподаватели', 'admin'],
-        ['admin.html', 'Учебные планы', 'admin'],
-        ['progress.html', 'Часы', 'admin'],
-        ['vedomost.html', 'Ведомость', 'admin'],
-        ['algorithm_settings.html', 'Алгоритм', 'admin'],
-        ['users.html', 'Доступы', 'admin'],
+        ['groups_subjects.html', 'Справочники', 'editor'],
+        ['academic_years.html', 'Учебные годы', 'editor'],
+        ['teachers.html', 'Преподаватели', 'editor'],
+        ['admin.html', 'Учебные планы', 'editor'],
+        ['progress.html', 'Часы', 'editor'],
+        ['vedomost.html', 'Ведомость', 'editor'],
+        ['algorithm_settings.html', 'Алгоритм', 'editor'],
+        ['users.html', 'Доступы', 'owner'],
         ['index.html', 'Расписание', 'all'],
     ];
     const render = (user = null) => {
-        const visible = pages.filter(([, , role]) => role === 'all' || user?.is_admin);
+        const visible = pages.filter(([, , role]) => (
+            role === 'all'
+            || (role === 'editor' && ['owner', 'admin'].includes(user?.role))
+            || (role === 'owner' && user?.role === 'owner')
+        ));
         const links = visible.map(([href, label]) => `<a href="/html/${href}" class="app-nav-link ${href === current ? 'is-active' : ''} ${href === 'index.html' ? 'is-schedule' : ''}">${label}</a>`).join('');
         const userBlock = user ? `<div class="app-user"><span>${user.login}</span><button type="button" title="Выйти" aria-label="Выйти" data-logout>↗</button></div>` : '';
         nav.innerHTML = `<div class="app-nav"><div class="app-brand-group"><a class="app-brand" href="/html/index.html" aria-label="EduSync"><span class="app-brand-mark">E</span><span class="app-brand-name">EduSync<small>2026</small></span></a><button type="button" class="theme-toggle" data-theme-toggle aria-label="Переключить тему" title="Переключить тему"><span class="theme-toggle-icon theme-toggle-sun">☼</span><span class="theme-toggle-track"><span class="theme-toggle-thumb"></span></span><span class="theme-toggle-icon theme-toggle-moon">☾</span></button></div><div class="app-nav-links">${links}${userBlock}</div></div>`;

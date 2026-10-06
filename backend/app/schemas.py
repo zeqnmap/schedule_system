@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Literal, Optional
 from datetime import date
 
 
@@ -91,9 +91,9 @@ class CoursePlanOut(CoursePlanBase):
 
 
 class ScheduleEntryBase(BaseModel):
-    week_number: int
-    day_of_week: int
-    time_slot: int
+    week_number: int = Field(ge=1, le=53)
+    day_of_week: int = Field(ge=1, le=6)
+    time_slot: int = Field(ge=1, le=12)
     room_name: str
     teacher_id: Optional[int] = None
     teacher2_id: Optional[int] = None
@@ -116,9 +116,9 @@ class ScheduleEntryOut(ScheduleEntryBase):
 
 
 class ScheduleEntryUpdate(BaseModel):
-    week_number: int
-    day_of_week: int
-    time_slot: int
+    week_number: int = Field(ge=1, le=53)
+    day_of_week: int = Field(ge=1, le=6)
+    time_slot: int = Field(ge=1, le=12)
     room_name: str
     teacher_id: Optional[int] = None
     teacher2_id: Optional[int] = None
@@ -136,12 +136,12 @@ class ScheduleEntryUpdate(BaseModel):
 class ArchivedWeekToggle(BaseModel):
     group_id: int
     week_number: int
-    academic_year_id: Optional[int] = None
+    academic_year_id: int
 
 
 class ArchivedWeekAllToggle(BaseModel):
     week_number: int
-    academic_year_id: Optional[int] = None
+    academic_year_id: int
 
 
 class ArchivedWeekOut(BaseModel):
@@ -314,19 +314,19 @@ class LoginRequest(BaseModel):
 class UserCreate(BaseModel):
     login: str
     password: str
-    is_admin: bool = False
+    role: Literal["admin", "user"] = "user"
 
 
 class UserUpdate(BaseModel):
     password: Optional[str] = None
-    is_admin: Optional[bool] = None
+    role: Optional[Literal["admin", "user"]] = None
     is_active: Optional[bool] = None
 
 
 class UserOut(BaseModel):
     id: int
     login: str
-    is_admin: bool
+    role: str
     is_active: bool
 
     class Config: from_attributes = True
