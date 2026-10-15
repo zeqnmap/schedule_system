@@ -1644,14 +1644,19 @@ def fit_pdf_cell(text_value: str, width: float, font_name: str = "ScheduleFont",
     return value[:low].rstrip() + suffix
 
 
-def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None):
+def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None, group_number: Optional[int] = None):
     font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
     if not font_path:
         raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
     pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
     bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
     pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
-    group_records = {group.id: group for group in db.query(models.Group).all()}
+    group_query = db.query(models.Group)
+    if group_number is not None:
+        group_query = group_query.filter(models.Group.number == group_number)
+    group_records = {group.id: group for group in group_query.all()}
+    if group_number is not None and not group_records:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
     group_numbers = {group_id: group.number for group_id, group in group_records.items()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
     year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first() if academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
@@ -1670,6 +1675,8 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
         query = query.filter(models.ScheduleEntry.academic_year_id == academic_year_id)
     if day is not None:
         query = query.filter(models.ScheduleEntry.day_of_week == day)
+    if group_number is not None:
+        query = query.filter(models.ScheduleEntry.group_id.in_(group_records))
     entries = query.order_by(
         models.ScheduleEntry.day_of_week,
         models.ScheduleEntry.group_id,
@@ -1737,6 +1744,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
 
         for item in day_curators:
             target_groups = [item.group_id] if item.group_id not in (0, None) else [group_id for group_id in group_numbers if (group_id, item.time_slot) not in specific_slots]
+            target_groups = [group_id for group_id in target_groups if group_id in group_records]
             for group_id in target_groups:
                 if not group_has_classes_on_date(db, group_id, academic_year_id, selected_date):
                     continue
@@ -2214,6 +2222,89 @@ def broadcast_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, cap
     raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
 
 
+def save_group_pdf_to_telegram(pdf: io.BytesIO, group_number: int, filename: str, caption: str) -> None:
+    """Store a student PDF for one group without creating a broadcast job."""
+    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
+    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
+    if not bot_url or not bot_secret:
+        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
+    query = urlencode({"group_number": group_number, "filename": filename, "caption": caption})
+    bot_urls = [bot_url]
+    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
+        bot_urls.append("http://127.0.0.1:8081")
+    last_network_error = None
+    for candidate in dict.fromkeys(bot_urls):
+        request = UrlRequest(
+            f"{candidate}/internal/group-schedule?{query}",
+            data=pdf.getvalue(),
+            headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=30):
+                return
+        except HTTPError as exc:
+            raise HTTPException(status_code=502, detail="Бот не принял расписание группы") from exc
+        except (URLError, TimeoutError) as exc:
+            last_network_error = exc
+    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
+
+
+def store_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, caption: str) -> None:
+    """Store the original PDF in the bot without starting a broadcast."""
+    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
+    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
+    if not bot_url or not bot_secret:
+        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
+    query = urlencode({"audience": audience, "filename": filename, "caption": caption})
+    bot_urls = [bot_url]
+    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
+        bot_urls.append("http://127.0.0.1:8081")
+    last_network_error = None
+    for candidate in dict.fromkeys(bot_urls):
+        request = UrlRequest(
+            f"{candidate}/internal/store-pdf?{query}",
+            data=pdf.getvalue(),
+            headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=30):
+                return
+        except HTTPError as exc:
+            raise HTTPException(status_code=502, detail="Бот не сохранил PDF") from exc
+        except (URLError, TimeoutError) as exc:
+            last_network_error = exc
+    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
+
+
+def broadcast_student_groups_to_telegram() -> dict:
+    """Ask the bot to deliver each student the PDF for the group in their profile."""
+    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
+    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
+    if not bot_url or not bot_secret:
+        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
+    bot_urls = [bot_url]
+    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
+        bot_urls.append("http://127.0.0.1:8081")
+    last_network_error = None
+    for candidate in dict.fromkeys(bot_urls):
+        request = UrlRequest(
+            f"{candidate}/internal/broadcast-student-groups",
+            data=b"",
+            headers={"X-Bot-Secret": bot_secret},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise HTTPException(status_code=502, detail="Бот не поставил персональную рассылку в очередь") from exc
+        except (URLError, TimeoutError) as exc:
+            last_network_error = exc
+    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
+
+
 @app.post("/telegram/broadcast-schedule")
 def broadcast_schedule_to_telegram(
     week_number: int = 1,
@@ -2245,6 +2336,13 @@ def broadcast_schedule_to_telegram(
     else:
         caption = f"Расписание на неделю № {week_number}"
     pdf = build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date) if audience == "student" else build_teachers_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date)
+    if audience == "student":
+        store_pdf_to_telegram(pdf, audience, filename, caption)
+        groups = db.query(models.Group).order_by(models.Group.number).all()
+        for group in groups:
+            group_pdf = build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date, group.number)
+            save_group_pdf_to_telegram(group_pdf, group.number, f"Расписание группы {group.number}.pdf", caption)
+        return broadcast_student_groups_to_telegram()
     return broadcast_pdf_to_telegram(pdf, audience, filename, caption)
 
 
