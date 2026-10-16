@@ -1184,7 +1184,13 @@ def get_plans_progress(group_id: Optional[int] = None, academic_year_id: Optiona
         term = db.query(models.GroupTerm).filter_by(id=p.term_id).first() if p.term_id else None
         result.append({
             "plan_id": p.id, "group_id": p.group_id, "group_number": groups_dict.get(p.group_id, str(p.group_id)),
-            "subject_name": p.subject_name, "teacher_name": teachers_dict.get(p.teacher_id, "Не назначен"),
+            "subject_name": p.subject_name,
+            "teacher_name": teachers_dict.get(p.teacher_id) or teachers_dict.get(p.teacher2_id, "Не назначен"),
+            "teacher2_name": (
+                teachers_dict.get(p.teacher2_id)
+                if p.teacher_id and p.teacher2_id and p.teacher2_id != p.teacher_id
+                else None
+            ),
             "total_hours": p.total_hours, "scheduled_hours": actual_count, "diff": actual_count - p.total_hours,
             "percentage": min(percentage, 100.0), "raw_percentage": percentage,
             "term_id": p.term_id, "term_name": term.name if term else "Семестр не указан"
