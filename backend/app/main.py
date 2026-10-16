@@ -1786,9 +1786,12 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
 
         subject_width = max([stringWidth(str(entry.subject_name or "Предмет"), "ScheduleFont", 8) + 10 * mm for entry in day_entries] or [45 * mm])
         subject_width = min(max(subject_width, 45 * mm), 125 * mm)
+        room_width = max([stringWidth(str(row[3]), "ScheduleFont", 8) + 10 * mm for row in rows[1:]] or [27 * mm])
+        room_width = min(max(room_width, 27 * mm), 45 * mm)
         for row in rows[1:]:
             row[2] = fit_pdf_cell(row[2], subject_width - 14)
-        table = Table(rows, colWidths=[23 * mm, 20 * mm, subject_width, 27 * mm, 52 * mm], repeatRows=1, hAlign="CENTER")
+            row[3] = fit_pdf_cell(row[3], room_width - 14)
+        table = Table(rows, colWidths=[23 * mm, 20 * mm, subject_width, room_width, 52 * mm], repeatRows=1, hAlign="CENTER")
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
