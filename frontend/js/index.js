@@ -121,8 +121,21 @@ createApp({ setup() {
         modalMode.value = null;
         errorMessage.value = '';
     };
-    watch(selectedGroupId, async () => { selectedTermId.value = currentGroupTerms.value[0]?.id || null; await Promise.all([loadCuratorOverrides(), loadCalendarBlocks()]); });
-    watch(selectedTermId, () => { if (currentTermWeeks.value.length) { selectedWeek.value = currentTermWeeks.value[0]; selectedDate.value = currentTerm.value?.start_date || dateForWeek(selectedWeek.value); } fetchSchedule(); fetchArchiveStatus(); });
+    watch(selectedGroupId, async () => {
+        const termForSelectedDate = currentGroupTerms.value.find(term => selectedDate.value && selectedDate.value >= term.start_date && selectedDate.value <= term.end_date);
+        selectedTermId.value = termForSelectedDate?.id || currentGroupTerms.value[0]?.id || null;
+        await Promise.all([loadCuratorOverrides(), loadCalendarBlocks()]);
+    });
+    watch(selectedTermId, () => {
+        const term = currentTerm.value;
+        const dateIsInTerm = Boolean(term && selectedDate.value && selectedDate.value >= term.start_date && selectedDate.value <= term.end_date);
+        if (currentTermWeeks.value.length) {
+            selectedWeek.value = dateIsInTerm ? weekForDate(selectedDate.value) : currentTermWeeks.value[0];
+            if (!dateIsInTerm) selectedDate.value = term?.start_date || dateForWeek(selectedWeek.value);
+        }
+        fetchSchedule();
+        fetchArchiveStatus();
+    });
     watch(selectedDate, value => { if (!value) return; const week = weekForDate(value); if (currentTermWeeks.value.includes(week)) selectedWeek.value = week; });
     watch(selectedWeek, () => { fetchSchedule(); fetchArchiveStatus(); });
     onMounted(async () => { await fetchData(); await fetchSchedule(); await fetchArchiveStatus(); });
