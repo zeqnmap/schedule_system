@@ -1,8 +1,10 @@
+import os
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # Рабочая база подключена к файлу, который пробрасывает Docker Compose.
-SQLALCHEMY_DATABASE_URL = "sqlite:///./schedule.db"
+SQLALCHEMY_DATABASE_URL = os.getenv("SCHEDULE_DATABASE_URL", "sqlite:///./schedule.db")
 
 # check_same_thread=False нужно только для SQLite в FastAPI
 engine = create_engine(

@@ -115,7 +115,6 @@ def consumed_hours(db: Session, plan, before_week=None) -> int:
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.group_id == plan.group_id,
         models.ScheduleEntry.subject_name == plan.subject_name,
-        models.ScheduleEntry.status != "canceled",
     )
     if getattr(plan, "term_id", None):
         query = query.filter(models.ScheduleEntry.term_id == plan.term_id)
@@ -138,8 +137,6 @@ def consumed_hours_by_plan(db: Session):
         models.ScheduleEntry.subject_name,
         models.ScheduleEntry.term_id,
         func.count(models.ScheduleEntry.id),
-    ).filter(
-        models.ScheduleEntry.status != "canceled"
     ).group_by(
         models.ScheduleEntry.group_id,
         models.ScheduleEntry.subject_name,
@@ -282,7 +279,6 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
     fixed_entries = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.week_number == week,
         models.ScheduleEntry.academic_year_id.in_({year.id for year in year_by_group.values()}),
-        models.ScheduleEntry.status != "canceled",
     ).all()
     fixed_group_slots = {
         (entry.group_id, entry.day_of_week - 1, entry.time_slot - 1)
@@ -643,7 +639,6 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
                             teacher2_id=demand.plan.teacher2_id,
                             group_id=group.id,
                             subject_name=demand.plan.subject_name,
-                            status="planned",
                             is_generated=True,
                             term_id=terms_by_group[group.id].id,
                             academic_year_id=terms_by_group[group.id].academic_year_id,
@@ -707,7 +702,6 @@ def trigger_global_generation(
     for entry in db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.term_id.in_([term.id for term in unlocked_terms]),
         models.ScheduleEntry.is_generated.is_(True),
-        or_(models.ScheduleEntry.status == "planned", models.ScheduleEntry.status.is_(None))
     ).all():
         if (entry.group_id, entry.week_number, entry.academic_year_id) not in archived:
             db.delete(entry)

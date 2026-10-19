@@ -11,6 +11,7 @@ from types import SimpleNamespace
 os.environ.setdefault("ADMIN_LOGIN", "test-owner")
 os.environ.setdefault("ADMIN_PASSWORD", "test-password-123")
 os.environ.setdefault("SESSION_SECRET", "schedule-test-session-secret")
+os.environ.setdefault("SCHEDULE_DATABASE_URL", f"sqlite:///{Path(tempfile.gettempdir()) / 'schedule-system-test-import.db'}")
 
 from fastapi import HTTPException
 from fastapi import FastAPI
@@ -21,7 +22,9 @@ from sqlalchemy.orm import sessionmaker
 from reportlab.pdfgen import canvas
 from pypdf import PdfReader
 
-from backend.app import database, main, models, schemas, solver, migrations
+from backend.app import database, models, schemas, solver, migrations
+migrations.upgrade(database.engine)
+from backend.app import main
 
 
 class ScheduleSystemTests(unittest.TestCase):
@@ -311,7 +314,7 @@ class ScheduleSystemTests(unittest.TestCase):
             week_number=1, day_of_week=2, time_slot=1, room_name="101",
             teacher_id=item.teacher.id, group_id=other_group.id, subject_name="Other",
             academic_year_id=item.year.id, term_id=item.term.id,
-            schedule_date=date(2026, 9, 1), status="planned",
+            schedule_date=date(2026, 9, 1),
         )); self.db.commit()
         response = self.client.get("/schedule/available-options", params={
             "group_id": item.group.id, "term_id": item.term.id,
@@ -322,24 +325,35 @@ class ScheduleSystemTests(unittest.TestCase):
         self.assertNotIn(item.teacher.id, response.json()["teachers"])
         self.assertNotIn("101", response.json()["rooms"])
 
-    def test_pdf_contains_generated_subject_and_omits_canceled_entry(self):
+    def test_pdf_shows_legacy_canceled_entries_after_data_migration(self):
         item = self.fixture()
         scheduled = models.ScheduleEntry(
             week_number=1, day_of_week=2, time_slot=1, room_name="101",
             teacher_id=item.teacher.id, group_id=item.group.id, subject_name="Математика",
-            academic_year_id=item.year.id, term_id=item.term.id, schedule_date=date(2026, 9, 1), status="planned",
+            academic_year_id=item.year.id, term_id=item.term.id, schedule_date=date(2026, 9, 1),
         )
-        canceled = models.ScheduleEntry(
+        legacy_canceled = models.ScheduleEntry(
             week_number=1, day_of_week=2, time_slot=2, room_name="101",
-            teacher_id=item.teacher.id, group_id=item.group.id, subject_name="НЕ ДОЛЖНО БЫТЬ В PDF",
-            academic_year_id=item.year.id, term_id=item.term.id, schedule_date=date(2026, 9, 1), status="canceled",
+            teacher_id=item.teacher.id, group_id=item.group.id, subject_name="Старое отменённое занятие",
+            academic_year_id=item.year.id, term_id=item.term.id, schedule_date=date(2026, 9, 1),
         )
-        self.db.add_all([scheduled, canceled]); self.db.commit()
+        self.db.add_all([scheduled, legacy_canceled]); self.db.commit()
+        with self.engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE schedule_entries ADD COLUMN status VARCHAR DEFAULT 'planned'")
+            connection.exec_driver_sql("UPDATE schedule_entries SET status='canceled' WHERE id=?", (legacy_canceled.id,))
+        migrations.upgrade(self.engine)
+        with self.engine.connect() as connection:
+            self.assertEqual(connection.exec_driver_sql("SELECT status FROM schedule_entries WHERE id=?", (legacy_canceled.id,)).scalar_one(), "planned")
         pdf = main.build_schedule_pdf(self.db, 1, group_number=345, academic_year_id=item.year.id)
         pages = PdfReader(io.BytesIO(pdf.getvalue())).pages
         extracted = "\n".join(page.extract_text() or "" for page in pages)
         self.assertIn("Математика", extracted)
-        self.assertNotIn("НЕ ДОЛЖНО БЫТЬ В PDF", extracted)
+        self.assertIn("Старое отменённое занятие", extracted)
+
+    def test_schedule_api_has_no_cancel_or_restore_routes(self):
+        routes = {route.path for route in main.app.routes if hasattr(route, "path")}
+        self.assertNotIn("/schedule/{entry_id}/cancel", routes)
+        self.assertNotIn("/schedule/{entry_id}/restore", routes)
 
     def test_pdf_endpoint_requires_session_and_returns_pdf(self):
         item = self.fixture()

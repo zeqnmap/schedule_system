@@ -72,7 +72,6 @@ class ScheduleEntry(Base):
     room2_name = Column(String, nullable=True)
     group_id = Column(Integer, ForeignKey("groups.id"))
     subject_name = Column(String)
-    status = Column(String, default="planned") # <--- НОВАЯ ЛОГИКА (planned / canceled)
     is_generated = Column(Boolean, default=False, nullable=False)
     term_id = Column(Integer, ForeignKey("group_terms.id"), nullable=True, index=True)
     academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=True, index=True)

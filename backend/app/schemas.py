@@ -100,7 +100,6 @@ class ScheduleEntryBase(BaseModel):
     room2_name: Optional[str] = None
     group_id: int
     subject_name: str
-    status: str = "planned"  # <--- ДОБАВЛЕНО
     term_id: Optional[int] = None
     academic_year_id: Optional[int] = None
     schedule_date: Optional[date] = None
@@ -125,7 +124,6 @@ class ScheduleEntryUpdate(BaseModel):
     room2_name: Optional[str] = None
     group_id: int
     subject_name: str
-    status: str = "planned"
     term_id: Optional[int] = None
     academic_year_id: Optional[int] = None
     schedule_date: Optional[date] = None

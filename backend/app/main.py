@@ -250,7 +250,6 @@ def validate_curator_override_conflicts(
             models.ScheduleEntry.academic_year_id == academic_year_id,
             models.ScheduleEntry.schedule_date == schedule_date,
             models.ScheduleEntry.time_slot == slot,
-            models.ScheduleEntry.status != "canceled",
         ).all()
         if teacher_id and any(teacher_id in {entry.teacher_id, entry.teacher2_id} for entry in entries):
             raise HTTPException(status_code=409, detail="Преподаватель уже занят в этот день и урок")
@@ -625,7 +624,6 @@ def validate_group_curator_assignment(group_id: int, teacher_id: Optional[int], 
             models.ScheduleEntry.day_of_week == slot.day_of_week,
             models.ScheduleEntry.time_slot >= slot.time_slot,
             models.ScheduleEntry.time_slot < slot.time_slot + slot.duration,
-            models.ScheduleEntry.status != "canceled",
         ).all()
         if teacher_id and any(teacher_id in {entry.teacher_id, entry.teacher2_id} for entry in occupied_entries):
             raise HTTPException(status_code=409, detail="Этот куратор уже ведёт занятие в выбранный день и урок")
@@ -869,18 +867,15 @@ def get_plans_progress(group_id: Optional[int] = None, academic_year_id: Optiona
 
     result = []
     for p in plans:
-        # ВАЖНО: Считаем только живые часы. Болезни (canceled) не идут в зачет!
         actual_count = db.query(models.ScheduleEntry).filter(
             models.ScheduleEntry.group_id == p.group_id,
             models.ScheduleEntry.subject_name == p.subject_name,
-            models.ScheduleEntry.status != 'canceled'
         ).count()
         if p.term_id:
             actual_count = db.query(models.ScheduleEntry).filter(
                 models.ScheduleEntry.group_id == p.group_id,
                 models.ScheduleEntry.subject_name == p.subject_name,
                 models.ScheduleEntry.term_id == p.term_id,
-                models.ScheduleEntry.status != 'canceled'
             ).count()
 
         percentage = round((actual_count / p.total_hours * 100), 1) if p.total_hours > 0 else 0
@@ -1247,7 +1242,6 @@ def get_schedule_available_options(group_id: int, term_id: int, week_number: int
         models.ScheduleEntry.week_number == week_number,
         models.ScheduleEntry.day_of_week == day_of_week,
         models.ScheduleEntry.time_slot == time_slot,
-        models.ScheduleEntry.status != "canceled",
     ).all()
     entries = [entry for entry in entries if entry.id != exclude_entry_id]
     if any(entry.group_id == group_id for entry in entries):
@@ -1342,7 +1336,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
         (item.group_id, item.curator_hour_id, item.schedule_date): item
         for item in db.query(models.GroupCuratorHourOverride).all()
     }
-    query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.status != "canceled")
+    query = db.query(models.ScheduleEntry)
     if start_date and end_date:
         query = query.filter(models.ScheduleEntry.schedule_date >= start_date, models.ScheduleEntry.schedule_date <= end_date)
     else:
@@ -1512,7 +1506,7 @@ def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int
         (item.group_id, item.curator_hour_id, item.schedule_date): item
         for item in db.query(models.GroupCuratorHourOverride).all()
     }
-    query = db.query(models.ScheduleEntry).filter(models.ScheduleEntry.status != "canceled")
+    query = db.query(models.ScheduleEntry)
     if start_date and end_date:
         query = query.filter(models.ScheduleEntry.schedule_date >= start_date, models.ScheduleEntry.schedule_date <= end_date)
     else:
@@ -1656,7 +1650,6 @@ def build_hours_statement_pdf(db: Session, group_id: int, start_date: date, end_
 
     entries = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.group_id == group.id,
-        models.ScheduleEntry.status != "canceled",
         models.ScheduleEntry.schedule_date.isnot(None),
         models.ScheduleEntry.schedule_date >= start_date,
         models.ScheduleEntry.schedule_date <= end_date,
@@ -1772,7 +1765,6 @@ def build_teacher_hours_statement_pdf(db: Session, teacher_id: int, start_date: 
         plan_by_group[plan.group_id] = plan_by_group.get(plan.group_id, 0) + int(plan.total_hours or 0)
     entries = db.query(models.ScheduleEntry).filter(
         (models.ScheduleEntry.teacher_id == teacher_id) | (models.ScheduleEntry.teacher2_id == teacher_id),
-        models.ScheduleEntry.status != "canceled",
         models.ScheduleEntry.schedule_date.isnot(None),
         models.ScheduleEntry.schedule_date >= start_date,
         models.ScheduleEntry.schedule_date <= end_date,
@@ -2156,7 +2148,6 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
         models.ScheduleEntry.week_number == data.week_number,
         models.ScheduleEntry.day_of_week == data.day_of_week,
         models.ScheduleEntry.time_slot == data.time_slot,
-        models.ScheduleEntry.status != "canceled",
     )
     if exclude_entry_id:
         query = query.filter(models.ScheduleEntry.id != exclude_entry_id)
@@ -2223,32 +2214,6 @@ def delete_schedule_entry(entry_id: int, _: models.User = Depends(require_admin)
     db.delete(entry)
     db.commit()
     return {"ok": True}
-
-# --- НОВЫЕ ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ БОЛЕЗНЯМИ ---
-@app.post("/schedule/{entry_id}/cancel", response_model=schemas.ScheduleEntryOut)
-def cancel_schedule_entry(entry_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
-    entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
-    if not entry:
-        raise HTTPException(status_code=404, detail="Занятие не найдено")
-    ensure_week_editable(entry.group_id, entry.week_number, entry.academic_year_id, db)
-    entry.status = "canceled"
-    entry.is_generated = False
-    db.commit()
-    db.refresh(entry)
-    return entry
-
-@app.post("/schedule/{entry_id}/restore", response_model=schemas.ScheduleEntryOut)
-def restore_schedule_entry(entry_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
-    entry = db.query(models.ScheduleEntry).filter_by(id=entry_id).first()
-    if not entry:
-        raise HTTPException(status_code=404, detail="Занятие не найдено")
-    ensure_week_editable(entry.group_id, entry.week_number, entry.academic_year_id, db)
-    entry.status = "planned"
-    entry.is_generated = False
-    db.commit()
-    db.refresh(entry)
-    return entry
-
 
 # Frontend is served by the same process, so Docker needs only one service.
 frontend_dir = Path(__file__).resolve().parents[2] / "frontend"

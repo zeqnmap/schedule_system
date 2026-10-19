@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from . import database, models
 
-CURRENT_REVISION = "0001_schedule_schema"
+CURRENT_REVISION = "0002_remove_canceled_lessons"
 
 
 def _add_column(engine: Engine, table: str, name: str, definition: str) -> bool:
@@ -66,6 +66,8 @@ def _apply_0001(engine: Engine) -> None:
             "UPDATE users SET role = CASE WHEN is_admin = 1 THEN 'owner' ELSE 'user' END "
             "WHERE role IS NULL OR role NOT IN ('owner', 'admin', 'user')"
         ))
+        if "status" in {column["name"] for column in inspect(engine).get_columns("schedule_entries")}:
+            connection.execute(text("UPDATE schedule_entries SET status = 'planned' WHERE status = 'canceled' OR status IS NULL"))
         connection.execute(text(
             "UPDATE users SET is_admin = CASE WHEN role = 'owner' THEN 1 ELSE 0 END"
         ))
