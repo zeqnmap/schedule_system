@@ -3,7 +3,7 @@ createApp({ setup() {
     const groups = ref([]), teachers = ref([]), rooms = ref([]), plans = ref([]), schedule = ref([]), allSchedule = ref([]), curatorHours = ref([]), curatorOverrides = ref([]), daysOff = ref([]), groupBreakDays = ref([]), terms = ref([]), academicYears = ref([]);
     const selectedAcademicYearId = ref(Number(localStorage.getItem('edusync-academic-year-id')) || null);
     const selectedGroupId = ref(null), selectedTermId = ref(null), selectedWeek = ref(1), selectedDate = ref(''), isArchived = ref(false), isArchivedAll = ref(false), isGenerating = ref(false);
-    const generationProgress = ref(0), generationCompleted = ref(0), generationTotal = ref(0);
+    const generationProgress = ref(0), generationCompleted = ref(0), generationTotal = ref(0), generationNotice = ref(null);
     watch(isGenerating, active => document.body.classList.toggle('generation-active', active));
     const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), activeCardId = ref(null), curatorEdit = ref(null), generationScope = ref(null), generationSettings = ref([]), scheduleAction = ref(null), scheduleActionMonth = ref(''), errorMessage = ref('');
     const slotOptions = ref({ plans: [], teachers: [], rooms: [] }), slotOptionsLoading = ref(false);
@@ -259,7 +259,16 @@ createApp({ setup() {
             .map(group => ({ group_id: group.id, number: group.number, weekly_hours: group.weekly_hours ?? 30, has_saturday: Boolean(group.has_saturday) }))
             .sort((a, b) => Number(a.number) - Number(b.number));
         errorMessage.value = '';
+        generationNotice.value = null;
         generationScope.value = 'all';
+    };
+    const parseGenerationResult = message => {
+        const [summary, details = ''] = String(message || '').split(/\n\nНЕДОСТАВЛЕННЫЕ ЧАСЫ[^:]*:\n/);
+        const shortages = details.split('\n').map(item => item.trim()).filter(Boolean).map(item => {
+            const match = item.match(/^Гр\.\s*(.+?),\s*(.+?):\s*не доставлено\s+(\d+)\s*ч\.?$/i);
+            return match ? { group: match[1], subject: match[2], hours: Number(match[3]) } : { group: '', subject: item, hours: null };
+        });
+        return { summary: summary.trim(), shortages };
     };
     const generateScheduleAll = async () => {
         const scope = generationScope.value || 'all';
@@ -314,7 +323,7 @@ createApp({ setup() {
             generationProgress.value = 100;
             generationScope.value = null;
             await fetchSchedule();
-            alert(result.message);
+            generationNotice.value = parseGenerationResult(result.message);
         } catch (e) { errorMessage.value = e.message || 'Ошибка связи с сервером.'; }
         finally { isGenerating.value = false; }
     };
@@ -396,5 +405,5 @@ createApp({ setup() {
             alert(data.job_id ? `PDF поставлен в очередь для ${data.queued} подписчиков. Номер рассылки: ${data.job_id}.` : `Рассылка завершена: отправлено ${data.delivered}, ошибок ${data.failed}.`);
         }
     };
-    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, generationProgress, generationCompleted, generationTotal, modalMode, form, selectedPlanId, slotOptionsLoading, activeCardId, curatorEdit, generationScope, generationSettings, scheduleAction, scheduleActionMonthTitle, scheduleActionCalendarDays, scheduleActionMonth, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTimeSlots, availableTeachers, availableTeachers2, availableRooms, availableRooms2, getDayName, getTeacherName, getTeacherNames, getRoomNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, removeCuratorHourForAllGroups, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, cancelCardEntry, restoreCardEntry, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, generateScheduleAll, exportPdf, exportTeachersPdf, openScheduleActions, selectScheduleActionDay, selectScheduleActionDate, previousScheduleActionMonth, nextScheduleActionMonth, downloadScheduleAction, broadcastScheduleAction, broadcastSchedule, formatDayDate, isBeforeTermStart };
+    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, generationProgress, generationCompleted, generationTotal, generationNotice, modalMode, form, selectedPlanId, slotOptionsLoading, activeCardId, curatorEdit, generationScope, generationSettings, scheduleAction, scheduleActionMonthTitle, scheduleActionCalendarDays, scheduleActionMonth, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTimeSlots, availableTeachers, availableTeachers2, availableRooms, availableRooms2, getDayName, getTeacherName, getTeacherNames, getRoomNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, removeCuratorHourForAllGroups, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, cancelCardEntry, restoreCardEntry, saveEntry, deleteEntry, cancelEntry, restoreEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, generateScheduleAll, exportPdf, exportTeachersPdf, openScheduleActions, selectScheduleActionDay, selectScheduleActionDate, previousScheduleActionMonth, nextScheduleActionMonth, downloadScheduleAction, broadcastScheduleAction, broadcastSchedule, formatDayDate, isBeforeTermStart };
 } }).component('searchable-select', SearchableSelect).mount('#app');

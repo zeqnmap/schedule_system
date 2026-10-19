@@ -78,6 +78,21 @@ body.dark-theme .lesson-action-edit { background: #303030; color: #e5e7eb; }
 body.generation-active > nav { display: none !important; }
 .generation-progress { width: min(420px, 100%); height: 12px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.22); }
 .generation-progress__fill { height: 100%; border-radius: inherit; background: #34d399; transition: width .2s ease; }
+.generation-result { position: relative; display: flex; gap: 16px; align-items: flex-start; margin: 24px 0 28px; padding: 20px 52px 20px 20px; border: 1px solid; border-radius: 18px; box-shadow: 0 10px 28px -20px rgba(15,23,42,.35); }
+.generation-result--complete { color: #065f46; background: #ecfdf5; border-color: #a7f3d0; }
+.generation-result--partial { color: #78350f; background: #fffbeb; border-color: #fcd34d; }
+.generation-result__icon { display: grid; flex: 0 0 32px; width: 32px; height: 32px; place-items: center; border-radius: 50%; font-size: 18px; font-weight: 900; background: currentColor; color: #fff; }
+.generation-result__eyebrow { margin: 0; font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; opacity: .7; }
+.generation-result__title { margin: 3px 0 2px; font-size: 18px; font-weight: 900; color: #0f172a; }
+.generation-result__summary { margin: 0; font-size: 13px; font-weight: 600; color: #475569; }
+.generation-result__details { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(180,83,9,.2); }
+.generation-result__details-title { margin: 0 0 7px; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
+.generation-result__row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid rgba(180,83,9,.14); font-size: 13px; color: #57534e; }
+.generation-result__hint { margin: 11px 0 0; font-size: 12px; font-weight: 600; color: #92400e; }
+.generation-result__close { position: absolute; top: 13px; right: 16px; color: #64748b; font-size: 24px; line-height: 1; }
+body.dark-theme .generation-result__title { color: #f8fafc; }
+body.dark-theme .generation-result__summary { color: #cbd5e1; }
+@media (max-width: 639px) { .generation-result { margin-top: 18px; padding: 16px 42px 16px 14px; } .generation-result__row { align-items: flex-start; flex-direction: column; gap: 3px; } }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 .spinner { border: 4px solid rgba(255,255,255,0.3); width: 40px; height: 40px; border-radius: 50%; border-left-color: #fff; animation: spin 1s linear infinite; }

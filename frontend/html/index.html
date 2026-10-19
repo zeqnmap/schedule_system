@@ -7,11 +7,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="../css/app-shell.css?v=20260933">
-    <link rel="stylesheet" href="../css/index.css?v=20261001-toolbar3">
+    <link rel="stylesheet" href="../css/index.css?v=20261019-generation-result">
     <script src="../js/searchable-select.js"></script>
     <script src="../js/auth.js" defer></script>
     <script src="../js/app-nav.js?v=20260933" defer></script>
-    <script src="../js/index.js?v=20261001-generation" defer></script>
+    <script src="../js/index.js?v=20261019-generation-result" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body class="page-schedule text-slate-800 antialiased min-h-screen">
@@ -63,6 +63,26 @@
                 </button>
             </div>
         </header>
+
+        <Transition name="fade">
+            <section v-if="generationNotice" class="generation-result" :class="generationNotice.shortages.length ? 'generation-result--partial' : 'generation-result--complete'" role="status" aria-live="polite">
+                <div class="generation-result__icon" aria-hidden="true">{{ generationNotice.shortages.length ? '!' : '✓' }}</div>
+                <div class="min-w-0 flex-1">
+                    <p class="generation-result__eyebrow">Результат генерации</p>
+                    <h2 class="generation-result__title">{{ generationNotice.shortages.length ? 'Расписание создано частично' : 'Расписание создано полностью' }}</h2>
+                    <p class="generation-result__summary">{{ generationNotice.summary }}</p>
+                    <div v-if="generationNotice.shortages.length" class="generation-result__details">
+                        <p class="generation-result__details-title">Не удалось разместить</p>
+                        <div v-for="item in generationNotice.shortages" :key="`${item.group}-${item.subject}`" class="generation-result__row">
+                            <span><strong>Гр. {{ item.group }}</strong> · {{ item.subject }}</span>
+                            <strong v-if="item.hours" class="whitespace-nowrap">{{ item.hours }} ч.</strong>
+                        </div>
+                        <p class="generation-result__hint">Проверьте учебный план, доступность преподавателя и кабинета, нормы часов и ограничения по дням.</p>
+                    </div>
+                </div>
+                <button type="button" class="generation-result__close" @click="generationNotice = null" aria-label="Закрыть сообщение">×</button>
+            </section>
+        </Transition>
 
         <Transition name="fade">
             <div v-if="generationScope" class="fixed inset-0 modal-glass flex items-center justify-center z-[100] p-6">

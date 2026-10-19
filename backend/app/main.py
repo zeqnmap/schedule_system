@@ -1,8 +1,4 @@
-import hashlib
-import hmac
 import os
-import secrets
-import time
 import io
 import json
 import logging
@@ -28,14 +24,18 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, text, inspect
+from sqlalchemy import or_, text
 
 from . import models, schemas, database, solver
-
-
-def common_curator_hour_filter():
-    """Support legacy zero and the nullable representation of a common hour."""
-    return or_(models.CuratorHour.group_id == 0, models.CuratorHour.group_id.is_(None))
+from .api.auth import router as auth_router
+from .api.rules import router as rules_router
+from .data_access import common_curator_hour_filter, group_has_classes_on_date, remove_entries_for_dates
+from .security import (
+    ADMIN_ROLE, OWNER_ROLE, SESSION_TTL, can_manage_schedule, current_user,
+    hash_password, is_owner, make_session, require_admin, require_owner,
+    require_user, user_role, verify_password, configure as configure_security,
+)
+from .migrations import require_current
 
 
 def calendar_week_for_date(year_start: date, target: date) -> int:
@@ -57,189 +57,17 @@ def load_env_file():
 
 load_env_file()
 
-# Создание таблиц (миграции здесь лучше убрать, так как ты удалишь БД)
-models.Base.metadata.create_all(bind=database.engine)
-teacher_columns = {column["name"] for column in inspect(database.engine).get_columns("teachers")}
-if "working_days" not in teacher_columns:
-    with database.engine.begin() as connection:
-        connection.execute(text("ALTER TABLE teachers ADD COLUMN working_days VARCHAR DEFAULT '1,2,3,4,5' NOT NULL"))
-if "vacation_weeks" not in teacher_columns:
-    with database.engine.begin() as connection:
-        connection.execute(text("ALTER TABLE teachers ADD COLUMN vacation_weeks VARCHAR DEFAULT '' NOT NULL"))
-curator_columns = {column["name"] for column in inspect(database.engine).get_columns("curator_hours")}
-with database.engine.begin() as connection:
-    if "room_name" not in curator_columns:
-        connection.execute(text("ALTER TABLE curator_hours ADD COLUMN room_name VARCHAR"))
-    if "teacher_id" not in curator_columns:
-        connection.execute(text("ALTER TABLE curator_hours ADD COLUMN teacher_id INTEGER"))
-    if "hour_type" not in curator_columns:
-        connection.execute(text("ALTER TABLE curator_hours ADD COLUMN hour_type VARCHAR DEFAULT 'curator' NOT NULL"))
-rule_columns = {column["name"] for column in inspect(database.engine).get_columns("algorithm_rules")}
-with database.engine.begin() as connection:
-    if "term_number" not in rule_columns:
-        connection.execute(text("ALTER TABLE algorithm_rules ADD COLUMN term_number INTEGER"))
-override_columns = {column["name"] for column in inspect(database.engine).get_columns("group_curator_hour_overrides")}
-with database.engine.begin() as connection:
-    if "schedule_date" not in override_columns:
-        connection.execute(text("ALTER TABLE group_curator_hour_overrides ADD COLUMN schedule_date DATE"))
-        # Earlier versions applied an override to every week. They are invalid
-        # once overrides become date-specific, so restore those cards.
-        connection.execute(text("DELETE FROM group_curator_hour_overrides"))
-group_columns = {column["name"] for column in inspect(database.engine).get_columns("groups")}
-with database.engine.begin() as connection:
-    if "curator_teacher_id" not in group_columns:
-        connection.execute(text("ALTER TABLE groups ADD COLUMN curator_teacher_id INTEGER"))
-    if "curator_room_name" not in group_columns:
-        connection.execute(text("ALTER TABLE groups ADD COLUMN curator_room_name VARCHAR"))
-user_columns = {column["name"] for column in inspect(database.engine).get_columns("users")}
-with database.engine.begin() as connection:
-    if "role" not in user_columns:
-        connection.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR DEFAULT 'user' NOT NULL"))
-    # The legacy flag denoted the single owner. Preserve that account while
-    # converting all former planning accounts into read-only users.
-    connection.execute(text("UPDATE users SET role = CASE WHEN is_admin = 1 THEN 'owner' ELSE 'user' END WHERE role IS NULL OR role NOT IN ('owner', 'admin', 'user')"))
-    connection.execute(text("UPDATE users SET is_admin = CASE WHEN role = 'owner' THEN 1 ELSE 0 END"))
-term_columns = {column["name"] for column in inspect(database.engine).get_columns("group_terms")}
-with database.engine.begin() as connection:
-    course_plan_columns = {column["name"] for column in inspect(database.engine).get_columns("course_plans")}
-    schedule_entry_columns = {column["name"] for column in inspect(database.engine).get_columns("schedule_entries")}
-    if "term_id" not in course_plan_columns:
-        connection.execute(text("ALTER TABLE course_plans ADD COLUMN term_id INTEGER"))
-    if "term_id" not in schedule_entry_columns:
-        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN term_id INTEGER"))
-    if "is_locked" not in term_columns:
-        connection.execute(text("ALTER TABLE group_terms ADD COLUMN is_locked BOOLEAN DEFAULT 0 NOT NULL"))
-    if "start_date" not in term_columns:
-        connection.execute(text("ALTER TABLE group_terms ADD COLUMN start_date DATE"))
-    if "end_date" not in term_columns:
-        connection.execute(text("ALTER TABLE group_terms ADD COLUMN end_date DATE"))
-    plan_columns = {column["name"] for column in inspect(database.engine).get_columns("course_plans")}
-    schedule_columns = {column["name"] for column in inspect(database.engine).get_columns("schedule_entries")}
-    archive_columns = {column["name"] for column in inspect(database.engine).get_columns("archived_weeks")}
-    if "academic_year_id" not in plan_columns:
-        connection.execute(text("ALTER TABLE course_plans ADD COLUMN academic_year_id INTEGER"))
-    if "academic_year_id" not in schedule_columns:
-        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN academic_year_id INTEGER"))
-    if "academic_year_id" not in archive_columns:
-        connection.execute(text("ALTER TABLE archived_weeks ADD COLUMN academic_year_id INTEGER"))
-    if "teacher_hours" not in plan_columns:
-        connection.execute(text("ALTER TABLE course_plans ADD COLUMN teacher_hours INTEGER"))
-    if "teacher2_hours" not in plan_columns:
-        connection.execute(text("ALTER TABLE course_plans ADD COLUMN teacher2_hours INTEGER"))
-    if "room_name" not in plan_columns:
-        connection.execute(text("ALTER TABLE course_plans ADD COLUMN room_name VARCHAR"))
-    if "room2_name" not in plan_columns:
-        connection.execute(text("ALTER TABLE course_plans ADD COLUMN room2_name VARCHAR"))
-    if "room2_name" not in schedule_columns:
-        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN room2_name VARCHAR"))
-    if "is_generated" not in schedule_columns:
-        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN is_generated BOOLEAN DEFAULT 0 NOT NULL"))
-    if "schedule_date" not in schedule_columns:
-        connection.execute(text("ALTER TABLE schedule_entries ADD COLUMN schedule_date DATE"))
-    connection.execute(text("UPDATE group_terms SET start_date = COALESCE(start_date, '2026-09-01'), end_date = COALESCE(end_date, date('2026-09-01', '+' || (start_week + weeks - 2) || ' days'))"))
-    connection.execute(text("UPDATE course_plans SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = course_plans.group_id AND group_terms.term_number = 1 LIMIT 1) WHERE term_id IS NULL"))
-    connection.execute(text("UPDATE course_plans SET academic_year_id = (SELECT academic_year_id FROM group_terms WHERE group_terms.id = course_plans.term_id) WHERE academic_year_id IS NULL"))
-    connection.execute(text("UPDATE schedule_entries SET term_id = (SELECT id FROM group_terms WHERE group_terms.group_id = schedule_entries.group_id AND schedule_entries.week_number >= group_terms.start_week AND schedule_entries.week_number < group_terms.start_week + group_terms.weeks ORDER BY group_terms.term_number LIMIT 1) WHERE term_id IS NULL"))
-    connection.execute(text("UPDATE schedule_entries SET academic_year_id = (SELECT academic_year_id FROM group_terms WHERE group_terms.id = schedule_entries.term_id) WHERE academic_year_id IS NULL"))
-    connection.execute(text("UPDATE curator_hours SET group_id = NULL WHERE group_id = 0"))
-    # Archive rows created before academic years were introduced belong to the
-    # then-active year. Without this backfill, the same week in a future year
-    # would be incorrectly locked too.
-    connection.execute(text("UPDATE archived_weeks SET academic_year_id = (SELECT id FROM academic_years WHERE is_active = 1 LIMIT 1) WHERE academic_year_id IS NULL"))
+configure_security(os.getenv("SESSION_SECRET", "change-this-session-secret"))
 
-# Convert legacy week-based rows once so calendar exclusions also remove
-# previously generated lessons, not only new ones.
-with database.SessionLocal() as migration_db:
-    legacy_entries = migration_db.query(models.ScheduleEntry).filter(models.ScheduleEntry.schedule_date.is_(None)).all()
-    years_by_id = {year.id: year for year in migration_db.query(models.AcademicYear).all()}
-    for entry in legacy_entries:
-        year = years_by_id.get(entry.academic_year_id)
-        if not year:
-            continue
-        monday = year.start_date - timedelta(days=year.start_date.isoweekday() - 1)
-        entry.schedule_date = monday + timedelta(days=(entry.week_number - 1) * 7 + entry.day_of_week - 1)
-    migration_db.commit()
+require_current()
 
 app = FastAPI(title="Schedule System API")
 
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
-
-SESSION_TTL = 60 * 60 * 12
-SESSION_SECRET = os.getenv("SESSION_SECRET", "change-this-session-secret")
-OWNER_ROLE = "owner"
-ADMIN_ROLE = "admin"
-USER_ROLE = "user"
-
-
-def hash_password(password: str, salt: str | None = None) -> str:
-    salt = salt or secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 210_000).hex()
-    return f"{salt}${digest}"
-
-
-def verify_password(password: str, stored_hash: str) -> bool:
-    try:
-        salt, expected = stored_hash.split("$", 1)
-        actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 210_000).hex()
-        return hmac.compare_digest(actual, expected)
-    except ValueError:
-        return False
-
-
-def make_session(user_id: int) -> str:
-    payload = f"{user_id}:{int(time.time())}"
-    signature = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    return f"{payload}:{signature}"
-
-
-def current_user(request: Request, db: Session) -> models.User:
-    token = request.cookies.get("schedule_session", "")
-    try:
-        user_id, issued_at, signature = token.split(":", 2)
-        payload = f"{user_id}:{issued_at}"
-        expected = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(signature, expected) or time.time() - int(issued_at) > SESSION_TTL:
-            raise ValueError
-        user = db.query(models.User).filter_by(id=int(user_id), is_active=True).first()
-        if not user:
-            raise ValueError
-        return user
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=401, detail="Требуется авторизация")
-
-
-def require_user(request: Request, db: Session = Depends(database.get_db)):
-    return current_user(request, db)
-
-
-def user_role(user: models.User) -> str:
-    role = (user.role or "").strip().lower()
-    return role if role in {OWNER_ROLE, ADMIN_ROLE, USER_ROLE} else (OWNER_ROLE if user.is_admin else USER_ROLE)
-
-
-def can_manage_schedule(user: models.User) -> bool:
-    return user_role(user) in {OWNER_ROLE, ADMIN_ROLE}
-
-
-def is_owner(user: models.User) -> bool:
-    return user_role(user) == OWNER_ROLE
-
-
-def require_admin(request: Request, db: Session = Depends(database.get_db)):
-    user = current_user(request, db)
-    if not can_manage_schedule(user):
-        raise HTTPException(status_code=403, detail="Нужны права администратора")
-    return user
-
-
-def require_owner(request: Request, db: Session = Depends(database.get_db)):
-    user = current_user(request, db)
-    if not is_owner(user):
-        raise HTTPException(status_code=403, detail="Управление аккаунтами доступно только владельцу")
-    return user
-
+app.include_router(auth_router)
+app.include_router(rules_router)
 
 @app.middleware("http")
 async def protect_site(request: Request, call_next):
@@ -302,84 +130,6 @@ def legacy_page(page_name: str):
     if page_name not in allowed_pages:
         raise HTTPException(status_code=404, detail="Страница не найдена")
     return RedirectResponse(f"/html/{page_name}.html")
-
-
-@app.post("/auth/login")
-def login(data: schemas.LoginRequest, response: Response, db: Session = Depends(database.get_db)):
-    user = db.query(models.User).filter_by(login=data.login.strip(), is_active=True).first()
-    if not user or not verify_password(data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
-    response.set_cookie("schedule_session", make_session(user.id), httponly=True, samesite="lax", max_age=SESSION_TTL)
-    return {"login": user.login, "role": user_role(user), "is_admin": is_owner(user)}
-
-
-@app.post("/auth/logout")
-def logout(response: Response):
-    response.delete_cookie("schedule_session")
-    return {"ok": True}
-
-
-@app.get("/auth/me")
-def me(user: models.User = Depends(require_user)):
-    return {"id": user.id, "login": user.login, "role": user_role(user), "is_admin": is_owner(user), "is_active": user.is_active}
-
-
-@app.get("/users/", response_model=List[schemas.UserOut])
-def read_users(_: models.User = Depends(require_owner), db: Session = Depends(database.get_db)):
-    return db.query(models.User).order_by(models.User.login).all()
-
-
-@app.post("/users/", response_model=schemas.UserOut)
-def create_user(data: schemas.UserCreate, _: models.User = Depends(require_owner), db: Session = Depends(database.get_db)):
-    login_name = data.login.strip()
-    if not login_name or not data.password:
-        raise HTTPException(status_code=400, detail="Логин и пароль обязательны")
-    if len(data.password) < 8:
-        raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 8 символов")
-    if db.query(models.User).filter_by(login=login_name).first():
-        raise HTTPException(status_code=409, detail="Такой логин уже существует")
-    user = models.User(login=login_name, password_hash=hash_password(data.password), role=data.role, is_admin=False)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-@app.delete("/users/{user_id}")
-def delete_user(user_id: int, current: models.User = Depends(require_owner), db: Session = Depends(database.get_db)):
-    if user_id == current.id:
-        raise HTTPException(status_code=400, detail="Нельзя удалить текущего владельца")
-    user = db.query(models.User).filter_by(id=user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Аккаунт не найден")
-    if is_owner(user):
-        raise HTTPException(status_code=400, detail="Владельца нельзя удалить")
-    db.delete(user)
-    db.commit()
-    return {"ok": True}
-
-
-@app.put("/users/{user_id}", response_model=schemas.UserOut)
-def update_user(user_id: int, data: schemas.UserUpdate, current: models.User = Depends(require_owner), db: Session = Depends(database.get_db)):
-    user = db.query(models.User).filter_by(id=user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    if user.id == current.id and data.is_active is False:
-        raise HTTPException(status_code=400, detail="Нельзя отключить собственный аккаунт")
-    if is_owner(user) and user.id != current.id:
-        raise HTTPException(status_code=400, detail="Нельзя изменять другого владельца")
-    if data.password:
-        if len(data.password) < 8:
-            raise HTTPException(status_code=400, detail="Пароль должен содержать минимум 8 символов")
-        user.password_hash = hash_password(data.password)
-    if data.is_active is not None:
-        user.is_active = data.is_active
-    if data.role is not None:
-        user.role = data.role
-        user.is_admin = False
-    db.commit()
-    db.refresh(user)
-    return user
 
 
 # ----------------- КАБИНЕТЫ (НОВОЕ) -----------------
@@ -463,53 +213,6 @@ def update_teacher_vacation_weeks(teacher_id: int, data: schemas.TeacherVacation
     room = db.query(models.Room).filter(models.Room.id == teacher.room_id).first()
     teacher.room_name = room.name if room else None
     return teacher
-
-
-def remove_entries_for_dates(
-    db: Session,
-    academic_year_id: int,
-    start_date: date,
-    end_date: date,
-    teacher_id: Optional[int] = None,
-    group_id: Optional[int] = None,
-) -> int:
-    query = db.query(models.ScheduleEntry).filter(
-        models.ScheduleEntry.academic_year_id == academic_year_id,
-        models.ScheduleEntry.schedule_date >= start_date,
-        models.ScheduleEntry.schedule_date <= end_date,
-    )
-    if teacher_id is not None:
-        query = query.filter(or_(models.ScheduleEntry.teacher_id == teacher_id, models.ScheduleEntry.teacher2_id == teacher_id))
-    if group_id is not None:
-        query = query.filter(models.ScheduleEntry.group_id == group_id)
-    return query.delete(synchronize_session=False)
-
-
-def group_has_classes_on_date(db: Session, group_id: int, academic_year_id: Optional[int], target_date: Optional[date]) -> bool:
-    """Whether an implicit common hour may exist for this group on this date."""
-    if target_date is None:
-        return True
-    if academic_year_id is None:
-        year = db.query(models.AcademicYear).filter_by(is_active=True).first()
-        academic_year_id = year.id if year else None
-    if academic_year_id is None:
-        return False
-    in_term = db.query(models.GroupTerm.id).filter(
-        models.GroupTerm.group_id == group_id,
-        models.GroupTerm.academic_year_id == academic_year_id,
-        models.GroupTerm.is_active.is_(True),
-        models.GroupTerm.start_date <= target_date,
-        models.GroupTerm.end_date >= target_date,
-    ).first()
-    if not in_term:
-        return False
-    if db.query(models.AcademicDayOff.id).filter_by(
-        academic_year_id=academic_year_id, day_date=target_date
-    ).first():
-        return False
-    return not db.query(models.GroupBreakDay.id).filter_by(
-        academic_year_id=academic_year_id, group_id=group_id, day_date=target_date
-    ).first()
 
 
 def validate_curator_override_conflicts(
@@ -1196,39 +899,6 @@ def get_plans_progress(group_id: Optional[int] = None, academic_year_id: Optiona
             "term_id": p.term_id, "term_name": term.name if term else "Семестр не указан"
         })
     return result
-
-
-# ----------------- НАСТРОЙКИ АЛГОРИТМА -----------------
-@app.get("/algorithm-rules/", response_model=List[schemas.AlgorithmRuleOut])
-def read_algorithm_rules(_: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
-    return db.query(models.AlgorithmRule).order_by(models.AlgorithmRule.subject_name, models.AlgorithmRule.course).all()
-
-
-@app.post("/algorithm-rules/", response_model=schemas.AlgorithmRuleOut)
-def create_algorithm_rule(data: schemas.AlgorithmRuleCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
-    if not data.subject_name.strip() or data.weekly_hours < 1:
-        raise HTTPException(status_code=400, detail="Укажите предмет и минимум 1 час в неделю")
-    if data.group_id is None and data.course is None:
-        raise HTTPException(status_code=400, detail="Выберите курс или конкретную группу")
-    if data.lesson_mode not in {"auto", "lessons", "pairs", "pair_and_lesson"}:
-        raise HTTPException(status_code=400, detail="Неизвестный режим занятий")
-    if data.term_number not in (None, 1, 2):
-        raise HTTPException(status_code=400, detail="Можно выбрать только 1-й или 2-й семестр")
-    rule = models.AlgorithmRule(**data.dict(exclude={"subject_name"}), subject_name=data.subject_name.strip())
-    db.add(rule)
-    db.commit()
-    db.refresh(rule)
-    return rule
-
-
-@app.delete("/algorithm-rules/{rule_id}")
-def delete_algorithm_rule(rule_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
-    rule = db.query(models.AlgorithmRule).filter_by(id=rule_id).first()
-    if not rule:
-        raise HTTPException(status_code=404, detail="Правило не найдено")
-    db.delete(rule)
-    db.commit()
-    return {"ok": True}
 
 
 @app.get("/curator-hours/", response_model=List[schemas.CuratorHourOut])
