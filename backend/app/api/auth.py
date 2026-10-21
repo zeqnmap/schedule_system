@@ -15,6 +15,9 @@ from ..security import (
     require_user,
     user_role,
     verify_password,
+    clear_login_failures,
+    login_allowed,
+    register_login_failure,
 )
 
 router = APIRouter()
@@ -22,10 +25,16 @@ router = APIRouter()
 
 @router.post("/auth/login")
 def login(data: schemas.LoginRequest, response: Response, db: Session = Depends(database.get_db)):
-    user = db.query(models.User).filter_by(login=data.login.strip(), is_active=True).first()
+    login_name = data.login.strip()
+    if not login_allowed(login_name):
+        raise HTTPException(status_code=429, detail="Слишком много попыток входа. Повторите позже.")
+    user = db.query(models.User).filter_by(login=login_name, is_active=True).first()
     if not user or not verify_password(data.password, user.password_hash):
+        register_login_failure(login_name)
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
-    response.set_cookie("schedule_session", make_session(user.id), httponly=True, samesite="lax", max_age=SESSION_TTL)
+    clear_login_failures(login_name)
+    secure = __import__("os").getenv("SESSION_COOKIE_SECURE", "0").lower() in {"1", "true", "yes"}
+    response.set_cookie("schedule_session", make_session(user.id), httponly=True, secure=secure, samesite="lax", max_age=SESSION_TTL)
     return {"login": user.login, "role": user_role(user), "is_admin": is_owner(user)}
 
 

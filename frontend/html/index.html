@@ -11,7 +11,7 @@
     <script src="../js/searchable-select.js"></script>
     <script src="../js/auth.js" defer></script>
     <script src="../js/app-nav.js?v=20260933" defer></script>
-    <script src="../js/index.js?v=20261019-remove-cancel" defer></script>
+    <script src="../js/index.js?v=20261021-broadcast-count" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body class="page-schedule text-slate-800 antialiased min-h-screen">
@@ -88,7 +88,8 @@
             <div v-if="generationScope" class="fixed inset-0 modal-glass flex items-center justify-center z-[100] p-6">
                 <div class="bg-white rounded-[24px] shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden border border-slate-200 flex flex-col">
                     <div class="p-8 border-b border-slate-100 flex justify-between items-start"><div><h3 class="text-2xl font-black text-slate-900">Что сгенерировать?</h3><p class="mt-2 text-sm font-semibold leading-relaxed text-slate-500">Будут заменены только занятия, ранее созданные алгоритмом, в выбранных открытых семестрах. Ручные и архивные занятия сохранятся.</p></div><button @click="generationScope = null" class="text-slate-400 hover:text-slate-900 text-xl font-bold">✕</button></div>
-                    <div class="p-8 grid gap-3 sm:grid-cols-3 bg-slate-50/50"><button v-for="scope in [1, 2, 'all']" :key="scope" @click="generationScope = scope" :class="generationScope === scope ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300'" class="rounded-2xl border p-4 text-left transition"><strong class="block text-base">{{ generationLabel(scope) }}</strong><span class="mt-1 block text-xs font-semibold opacity-70">{{ scope === 'all' ? '1-й и 2-й' : 'Только выбранный' }}</span></button></div>
+                    <div class="p-8 grid gap-3 sm:grid-cols-3 bg-slate-50/50"><button v-for="scope in [1, 2, 'all']" :key="scope" @click="selectGenerationScope(scope)" :class="generationScope === scope ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-300'" class="rounded-2xl border p-4 text-left transition"><strong class="block text-base">{{ generationLabel(scope) }}</strong><span class="mt-1 block text-xs font-semibold opacity-70">{{ scope === 'all' ? '1-й и 2-й' : 'Только выбранный' }}</span></button></div>
+                    <div class="mx-8 mb-6 rounded-2xl border border-slate-200 bg-white p-5"><div class="flex items-center justify-between gap-3"><h4 class="font-extrabold text-slate-900">Проверка перед генерацией</h4><span v-if="preflightLoading" class="text-xs font-bold text-slate-400">Проверяем...</span></div><div v-if="generationPreflight" class="mt-3 grid gap-2"><div v-for="check in generationPreflight.checks" :key="check.key" class="flex gap-3 rounded-xl px-3 py-2" :class="check.ok ? 'bg-emerald-50 text-emerald-900' : 'bg-rose-50 text-rose-900'"><strong>{{ check.ok ? '✓' : '!' }}</strong><p class="text-xs leading-relaxed"><b>{{ check.label }}.</b> {{ check.detail }}</p></div></div></div>
                     <div class="px-8 pb-6 min-h-0 overflow-y-auto">
                         <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3"><h4 class="font-extrabold text-slate-900">Нагрузка групп</h4><span class="text-xs text-slate-500">Не более 9 уроков в день; суббота только у отмеченных групп</span></div>
                         <div class="grid gap-2 sm:grid-cols-2">
@@ -100,7 +101,7 @@
                         </div>
                     </div>
                     <p v-if="errorMessage" role="alert" class="mx-8 mb-3 text-sm font-semibold text-red-600">{{ errorMessage }}</p>
-                    <div class="p-6 border-t border-slate-100 flex justify-end gap-3"><button @click="generationScope = null" class="px-6 py-3 text-slate-600 hover:bg-slate-100 font-bold rounded-xl">Отмена</button><button @click="generateScheduleAll" class="btn-emerald px-7 py-3 rounded-xl font-extrabold">Сгенерировать</button></div>
+                    <div class="p-6 border-t border-slate-100 flex justify-end gap-3"><button @click="generationScope = null" class="px-6 py-3 text-slate-600 hover:bg-slate-100 font-bold rounded-xl">Отмена</button><button @click="generateScheduleAll" :disabled="preflightLoading || !generationPreflight?.ready" class="btn-emerald px-7 py-3 rounded-xl font-extrabold disabled:opacity-50 disabled:cursor-not-allowed">Сгенерировать</button></div>
                 </div>
             </div>
         </Transition>

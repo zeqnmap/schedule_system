@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import secrets
 import time
+from collections import defaultdict, deque
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -15,6 +16,25 @@ SESSION_SECRET = "change-this-session-secret"
 OWNER_ROLE = "owner"
 ADMIN_ROLE = "admin"
 USER_ROLE = "user"
+_LOGIN_FAILURES: dict[str, deque[float]] = defaultdict(deque)
+LOGIN_WINDOW = 15 * 60
+LOGIN_LIMIT = 8
+
+
+def login_allowed(login: str) -> bool:
+    now = time.time()
+    failures = _LOGIN_FAILURES[login.casefold()]
+    while failures and now - failures[0] > LOGIN_WINDOW:
+        failures.popleft()
+    return len(failures) < LOGIN_LIMIT
+
+
+def register_login_failure(login: str) -> None:
+    _LOGIN_FAILURES[login.casefold()].append(time.time())
+
+
+def clear_login_failures(login: str) -> None:
+    _LOGIN_FAILURES.pop(login.casefold(), None)
 
 
 def configure(secret: str) -> None:

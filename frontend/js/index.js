@@ -3,7 +3,7 @@ createApp({ setup() {
     const groups = ref([]), teachers = ref([]), rooms = ref([]), plans = ref([]), schedule = ref([]), allSchedule = ref([]), curatorHours = ref([]), curatorOverrides = ref([]), daysOff = ref([]), groupBreakDays = ref([]), terms = ref([]), academicYears = ref([]);
     const selectedAcademicYearId = ref(Number(localStorage.getItem('edusync-academic-year-id')) || null);
     const selectedGroupId = ref(null), selectedTermId = ref(null), selectedWeek = ref(1), selectedDate = ref(''), isArchived = ref(false), isArchivedAll = ref(false), isGenerating = ref(false);
-    const generationProgress = ref(0), generationCompleted = ref(0), generationTotal = ref(0), generationNotice = ref(null);
+    const generationProgress = ref(0), generationCompleted = ref(0), generationTotal = ref(0), generationNotice = ref(null), generationPreflight = ref(null), preflightLoading = ref(false);
     watch(isGenerating, active => document.body.classList.toggle('generation-active', active));
     const modalMode = ref(null), form = ref({}), selectedPlanId = ref(null), activeCardId = ref(null), curatorEdit = ref(null), generationScope = ref(null), generationSettings = ref([]), scheduleAction = ref(null), scheduleActionMonth = ref(''), errorMessage = ref('');
     const slotOptions = ref({ plans: [], teachers: [], rooms: [] }), slotOptionsLoading = ref(false);
@@ -257,7 +257,20 @@ createApp({ setup() {
         errorMessage.value = '';
         generationNotice.value = null;
         generationScope.value = 'all';
+        loadGenerationPreflight();
     };
+    const loadGenerationPreflight = async () => {
+        preflightLoading.value = true; generationPreflight.value = null;
+        const scope = generationScope.value === 'all' ? '' : `?term_number=${generationScope.value}`;
+        try {
+            const response = await fetch(`/generate_schedule/preflight${scope}`);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Не удалось проверить данные');
+            generationPreflight.value = data;
+        } catch (error) { errorMessage.value = error.message || 'Не удалось проверить данные'; }
+        finally { preflightLoading.value = false; }
+    };
+    const selectGenerationScope = scope => { generationScope.value = scope; loadGenerationPreflight(); };
     const parseGenerationResult = message => {
         const [summary, details = ''] = String(message || '').split(/\n\nНЕДОСТАВЛЕННЫЕ ЧАСЫ[^:]*:\n/);
         const shortages = details.split('\n').map(item => item.trim()).filter(Boolean).map(item => {
@@ -395,11 +408,12 @@ createApp({ setup() {
         const response = await fetch(`/telegram/broadcast-schedule?${params}`, { method: 'POST' });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) { errorMessage.value = data.detail || 'Не удалось отправить PDF в Telegram'; return; }
-        if (data.job_id && Number(data.queued) === 0) {
+        const queued = Number(data.queued ?? data.pending ?? 0);
+        if (data.job_id && queued === 0) {
             alert('Рассылка не отправлена: нет подписчиков с выбранной ролью. Попросите пользователей выбрать роль через /role в боте.');
         } else {
-            alert(data.job_id ? `PDF поставлен в очередь для ${data.queued} подписчиков. Номер рассылки: ${data.job_id}.` : `Рассылка завершена: отправлено ${data.delivered}, ошибок ${data.failed}.`);
+            alert(data.job_id ? `PDF поставлен в очередь для ${queued} подписчиков. Номер рассылки: ${data.job_id}.` : `Рассылка завершена: отправлено ${data.delivered}, ошибок ${data.failed}.`);
         }
     };
-    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, generationProgress, generationCompleted, generationTotal, generationNotice, modalMode, form, selectedPlanId, slotOptionsLoading, activeCardId, curatorEdit, generationScope, generationSettings, scheduleAction, scheduleActionMonthTitle, scheduleActionCalendarDays, scheduleActionMonth, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTimeSlots, availableTeachers, availableTeachers2, availableRooms, availableRooms2, getDayName, getTeacherName, getTeacherNames, getRoomNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, removeCuratorHourForAllGroups, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, saveEntry, deleteEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, generateScheduleAll, exportPdf, exportTeachersPdf, openScheduleActions, selectScheduleActionDay, selectScheduleActionDate, previousScheduleActionMonth, nextScheduleActionMonth, downloadScheduleAction, broadcastScheduleAction, broadcastSchedule, formatDayDate, isBeforeTermStart };
+    return { groups, teachers, rooms, plans, schedule, allSchedule, curatorHours, curatorOverrides, daysOff, groupBreakDays, terms, academicYears, selectedAcademicYearId, selectAcademicYear, selectedGroupId, selectedTermId, selectedWeek, selectedDate, isArchived, isArchivedAll, isGenerating, generationProgress, generationCompleted, generationTotal, generationNotice, generationPreflight, preflightLoading, modalMode, form, selectedPlanId, slotOptionsLoading, activeCardId, curatorEdit, generationScope, generationSettings, scheduleAction, scheduleActionMonthTitle, scheduleActionCalendarDays, scheduleActionMonth, groupPlans, errorMessage, currentGroupTerms, currentTermWeeks, currentTerm, selectTerm, availableTimeSlots, availableTeachers, availableTeachers2, availableRooms, availableRooms2, getDayName, getTeacherName, getTeacherNames, getRoomNames, getEntries, hasActiveEntry, curatorHourAt, hiddenCuratorHourAt, curatorTeacherName, curatorRoomName, curatorCardId, openCuratorEdit, saveCuratorEdit, removeCuratorHourFromGroup, removeCuratorHourForAllGroups, restoreCuratorHourForGroup, onPlanChange, updateRoomFromTeacher, openCreateModal, openEditModal, toggleCardActions, deleteCardEntry, saveEntry, deleteEntry, toggleArchive, toggleArchiveAll, currentGroupNumber, currentGroupHasSaturday, currentGroupWeeklyHours, currentWeekActualHours, currentGroupSemesterWeeks, showSaturday, toggleSaturdayForGroup, changeWeeklyHoursPrompt, generationLabel, openGenerationDialog, selectGenerationScope, generateScheduleAll, exportPdf, exportTeachersPdf, openScheduleActions, selectScheduleActionDay, selectScheduleActionDate, previousScheduleActionMonth, nextScheduleActionMonth, downloadScheduleAction, broadcastScheduleAction, broadcastSchedule, formatDayDate, isBeforeTermStart };
 } }).component('searchable-select', SearchableSelect).mount('#app');

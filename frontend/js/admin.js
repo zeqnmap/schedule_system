@@ -1,6 +1,6 @@
 const { createApp, ref, computed, onMounted, watch } = Vue;
 createApp({ setup() {
-    const groups = ref([]), subjects = ref([]), teachers = ref([]), rooms = ref([]), plans = ref([]), terms = ref([]);
+    const groups = ref([]), subjects = ref([]), teachers = ref([]), rooms = ref([]), plans = ref([]), terms = ref([]), auditLogs = ref([]);
     const editingPlanId = ref(null);
     const selectedGroupId = ref(null), selectedTermId = ref(null), filterGroupSearch = ref('');
     const emptyForm = () => ({ group_id: null, term_id: null, subject_name: '', total_hours: null, max_weekly_hours: 4, teacher_id: null, teacher2_id: null, teacher_hours: null, teacher2_hours: null, room_name: null, room2_name: null });
@@ -8,12 +8,13 @@ createApp({ setup() {
     const availableSecondRooms = computed(() => rooms.value.filter(room => room.name !== form.value.room_name));
     watch(() => form.value.room_name, roomName => { if (form.value.room2_name === roomName) form.value.room2_name = null; });
     const errorMessage = ref('');
+    const fetchAudit = async () => { const response = await fetch('/audit-logs?limit=100'); if (response.ok) auditLogs.value = await response.json(); };
     const fetchData = async () => { try {
         const yearId = localStorage.getItem('edusync-academic-year-id'); const yearParam = yearId ? `?academic_year_id=${yearId}&limit=1000` : '?limit=1000';
         const [gRes, sRes, tRes, rRes, pRes, termRes] = await Promise.all([fetch('/groups/'), fetch('/subjects/'), fetch('/teachers/'), fetch('/rooms/'), fetch(`/course_plans/${yearParam}`), fetch(`/group-terms/${yearParam}`)]);
         if (gRes.ok) groups.value = await gRes.json(); if (sRes.ok) subjects.value = await sRes.json(); if (tRes.ok) teachers.value = await tRes.json(); if (rRes.ok) rooms.value = await rRes.json(); if (pRes.ok) plans.value = await pRes.json(); if (termRes.ok) terms.value = await termRes.json();
     } catch (e) { errorMessage.value = 'Ошибка подключения к серверу API'; } };
-    onMounted(fetchData);
+    onMounted(async () => { await fetchData(); await fetchAudit(); });
     const getGroupNumber = id => groups.value.find(g => g.id === id)?.number || id;
     const getTeacherName = id => teachers.value.find(t => t.id === id)?.name || id;
     const termsForForm = Vue.computed(() => terms.value.filter(term => Number(term.group_id) === Number(form.value.group_id)));
@@ -39,5 +40,5 @@ createApp({ setup() {
     const editPlan = p => { editingPlanId.value = p.id; form.value = { ...p }; };
     const resetForm = () => { editingPlanId.value = null; form.value = emptyForm(); };
     const deletePlan = async id => { if (!confirm('Точно удалить этот план?')) return; await fetch(`/course_plans/${id}`, { method: 'DELETE' }); fetchData(); };
-    return { groups, subjects, teachers, rooms, availableSecondRooms, plans, terms, form, editingPlanId, errorMessage, selectedGroupId, selectedTermId, filterGroupSearch, filteredGroups, availableFilterTerms, filteredPlans, termsForForm, getTermName, formatDate, savePlan, editPlan, resetForm, deletePlan, getGroupNumber, getTeacherName };
+    return { groups, subjects, teachers, rooms, availableSecondRooms, plans, terms, auditLogs, form, editingPlanId, errorMessage, selectedGroupId, selectedTermId, filterGroupSearch, filteredGroups, availableFilterTerms, filteredPlans, termsForForm, getTermName, formatDate, savePlan, editPlan, resetForm, deletePlan, getGroupNumber, getTeacherName, fetchAudit };
 } }).component('searchable-select', SearchableSelect).mount('#app');

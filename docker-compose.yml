@@ -16,6 +16,8 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-change-this-session-secret}
       BOT_BROADCAST_URL: ${BOT_BROADCAST_URL:-http://mgkap_schedule_bot:8081}
       BOT_SHARED_SECRET: ${BOT_SHARED_SECRET:-}
+      APP_ENV: ${APP_ENV:-development}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

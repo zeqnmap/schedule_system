@@ -4,7 +4,8 @@ import json
 import logging
 import queue
 import threading
-from datetime import date, timedelta
+import zipfile
+from datetime import date, timedelta, datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 from urllib.error import HTTPError, URLError
@@ -44,6 +45,20 @@ def calendar_week_for_date(year_start: date, target: date) -> int:
     return max(1, ((target - year_monday).days // 7) + 1)
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def write_audit(db: Session, user_id: int | None, action: str, method: str, path: str,
+                status_code: int | None = None, entity_type: str | None = None,
+                entity_id: str | None = None, details: str | None = None) -> None:
+    db.add(models.AuditLog(
+        user_id=user_id, action=action, method=method, path=path,
+        status_code=status_code, entity_type=entity_type, entity_id=entity_id,
+        details=details, created_at=utc_now(),
+    ))
+
+
 def load_env_file():
     env_path = Path(__file__).resolve().parents[2] / ".env"
     if not env_path.exists():
@@ -57,6 +72,20 @@ def load_env_file():
 
 load_env_file()
 
+def validate_security_configuration() -> None:
+    if os.getenv("APP_ENV", "").lower() not in {"production", "prod"}:
+        return
+    insecure = {
+        "SESSION_SECRET": {"", "change-this-session-secret"},
+        "ADMIN_PASSWORD": {"", "change-me-now"},
+        "BOT_SHARED_SECRET": {""},
+    }
+    invalid = [name for name, rejected in insecure.items() if os.getenv(name, "") in rejected]
+    if invalid or len(os.getenv("SESSION_SECRET", "")) < 32:
+        raise RuntimeError("Production requires non-default ADMIN_PASSWORD, SESSION_SECRET and BOT_SHARED_SECRET")
+
+
+validate_security_configuration()
 configure_security(os.getenv("SESSION_SECRET", "change-this-session-secret"))
 
 require_current()
@@ -73,10 +102,12 @@ app.include_router(rules_router)
 async def protect_site(request: Request, call_next):
     public_paths = {"/login.html", "/html/login.html", "/auth/login", "/docs", "/openapi.json", "/redoc"}
     public_asset = request.url.path.endswith((".js", ".css"))
+    audit_user_id = None
     if request.url.path not in public_paths and not public_asset and not request.url.path.startswith(("/docs/", "/redoc/")):
         db = database.SessionLocal()
         try:
             user = current_user(request, db)
+            audit_user_id = user.id
             admin_pages = {
                 "/teachers.html", "/groups_subjects.html", "/admin.html", "/progress.html", "/users.html", "/algorithm_settings.html",
                 "/vedomost.html", "/html/teachers.html", "/html/groups_subjects.html", "/html/admin.html", "/html/progress.html", "/html/vedomost.html", "/html/users.html", "/html/algorithm_settings.html",
@@ -92,13 +123,25 @@ async def protect_site(request: Request, call_next):
                 return Response(content='{"detail":"Управление аккаунтами доступно только владельцу"}', status_code=403, media_type="application/json")
             if admin_only and not can_manage_schedule(user):
                 return Response(content='{"detail":"Нужны права администратора"}', status_code=403, media_type="application/json")
+            if admin_only:
+                origin = request.headers.get("origin") or request.headers.get("referer")
+                if origin and urlsplit(origin).netloc != request.url.netloc:
+                    return Response(content='{"detail":"Недопустимый источник запроса"}', status_code=403, media_type="application/json")
         except HTTPException:
             if request.url.path.endswith(".html") or request.url.path == "/":
                 return Response(status_code=307, headers={"Location": "/html/login.html"})
             return Response(content='{"detail":"Требуется авторизация"}', status_code=401, media_type="application/json")
         finally:
             db.close()
-    return await call_next(request)
+    response = await call_next(request)
+    if audit_user_id and request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in {"/auth/logout"}:
+        audit_db = database.SessionLocal()
+        try:
+            write_audit(audit_db, audit_user_id, "request", request.method, request.url.path, response.status_code)
+            audit_db.commit()
+        finally:
+            audit_db.close()
+    return response
 
 
 def bootstrap_admin():
@@ -1154,19 +1197,71 @@ def toggle_archive_all(data: schemas.ArchivedWeekAllToggle, _: models.User = Dep
 generation_lock = threading.Lock()
 
 
+def create_generation_job(db: Session, term_number: Optional[int], user_id: Optional[int]) -> models.GenerationJob:
+    job = models.GenerationJob(
+        term_number=term_number, status="queued", created_by=user_id,
+        created_at=utc_now(), completed=0, total=0,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@app.get("/generate_schedule/preflight")
+def generation_preflight(term_number: Optional[int] = None, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    if term_number not in (None, 1, 2):
+        raise HTTPException(status_code=400, detail="Можно проверить 1-й, 2-й либо все семестры")
+    groups = db.query(models.Group).all()
+    terms = [term for term in db.query(models.GroupTerm).filter_by(is_active=True).all()
+             if not term.is_locked and (term_number is None or term.term_number == term_number)]
+    plans = db.query(models.CoursePlan).filter(models.CoursePlan.term_id.in_([term.id for term in terms])).all() if terms else []
+    rules = db.query(models.AlgorithmRule).filter_by(is_active=True).all()
+    errors = solver.validate_rules(groups, terms, plans, rules) if terms else []
+    checks = [
+        {"key": "groups", "ok": bool(groups), "label": "Учебные группы", "detail": f"Найдено групп: {len(groups)}" if groups else "Нет учебных групп."},
+        {"key": "terms", "ok": bool(terms), "label": "Открытые семестры", "detail": f"Подготовлено семестров: {len(terms)}" if terms else "Нет подходящих открытых семестров."},
+        {"key": "plans", "ok": bool(plans), "label": "Учебные планы", "detail": f"Назначений: {len(plans)}" if plans else "В выбранных семестрах нет учебных планов."},
+        {"key": "rules", "ok": not errors, "label": "Правила алгоритма", "detail": "Ошибок не найдено." if not errors else "\n".join(errors[:8])},
+    ]
+    return {"ready": all(item["ok"] for item in checks), "checks": checks}
+
+
+@app.get("/generation-jobs")
+def read_generation_jobs(limit: int = 20, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    limit = max(1, min(100, limit))
+    rows = db.query(models.GenerationJob).order_by(models.GenerationJob.id.desc()).limit(limit).all()
+    return [{"id": row.id, "term_number": row.term_number, "status": row.status, "completed": row.completed, "total": row.total, "message": row.message, "created_at": row.created_at, "started_at": row.started_at, "finished_at": row.finished_at} for row in rows]
+
+
+@app.get("/audit-logs")
+def read_audit_logs(limit: int = 100, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    limit = max(1, min(500, limit))
+    rows = db.query(models.AuditLog).order_by(models.AuditLog.id.desc()).limit(limit).all()
+    user_ids = {row.user_id for row in rows if row.user_id}
+    users = {user.id: user.login for user in db.query(models.User).filter(models.User.id.in_(user_ids)).all()} if user_ids else {}
+    return [{"id": row.id, "user": users.get(row.user_id, "система"), "action": row.action, "method": row.method, "path": row.path, "status_code": row.status_code, "entity_type": row.entity_type, "entity_id": row.entity_id, "details": row.details, "created_at": row.created_at} for row in rows]
+
+
 @app.post("/generate_schedule/", response_model=schemas.GenerateResponse)
-def trigger_generation(approve_adjustments: bool = False, term_number: Optional[int] = None, db: Session = Depends(database.get_db)):
+def trigger_generation(approve_adjustments: bool = False, term_number: Optional[int] = None, current: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     if term_number not in (None, 1, 2):
         raise HTTPException(status_code=400, detail="Можно генерировать 1-й, 2-й либо все семестры")
     if not generation_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Генерация уже выполняется")
+    job = create_generation_job(db, term_number, current.id)
+    job.status = "running"; job.started_at = utc_now(); db.commit()
     try:
         success, msg = solver.trigger_global_generation(db, approve_adjustments=approve_adjustments, term_number=term_number)
     except Exception:
         db.rollback()
+        failed_job = db.query(models.GenerationJob).filter_by(id=job.id).first()
+        failed_job.status = "failed"; failed_job.message = "Ошибка генерации расписания"; failed_job.finished_at = utc_now()
+        db.commit()
         raise
     finally:
         generation_lock.release()
+    job.status = "completed" if success else "failed"; job.message = msg; job.finished_at = utc_now(); db.commit()
     if not success:
         db.rollback()
         raise HTTPException(status_code=400, detail=msg)
@@ -1174,32 +1269,43 @@ def trigger_generation(approve_adjustments: bool = False, term_number: Optional[
 
 
 @app.post("/generate_schedule/stream")
-def stream_generation(term_number: Optional[int] = None):
+def stream_generation(term_number: Optional[int] = None, current: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     if term_number not in (None, 1, 2):
         raise HTTPException(status_code=400, detail="Можно генерировать 1-й, 2-й либо все семестры")
     if not generation_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Генерация уже выполняется")
+    job = create_generation_job(db, term_number, current.id)
     updates = queue.Queue()
 
     def run_generation():
         db = database.SessionLocal()
         try:
+            row = db.query(models.GenerationJob).filter_by(id=job.id).first()
+            row.status = "running"; row.started_at = utc_now(); db.commit()
             def report(completed, total):
+                row = db.query(models.GenerationJob).filter_by(id=job.id).first()
+                row.completed, row.total = completed, total
+                db.commit()
                 updates.put({"type": "progress", "completed": completed, "total": total})
 
             success, message = solver.trigger_global_generation(db, term_number=term_number, progress=report)
             if not success:
                 db.rollback()
+            row = db.query(models.GenerationJob).filter_by(id=job.id).first()
+            row.status = "completed" if success else "failed"
+            row.message = message; row.finished_at = utc_now()
+            db.commit()
             updates.put({"type": "result", "ok": success, "message": message})
         except Exception:
             db.rollback()
             logging.exception("Schedule generation failed")
+            row = db.query(models.GenerationJob).filter_by(id=job.id).first()
+            if row:
+                row.status = "failed"; row.message = "Ошибка генерации расписания"; row.finished_at = utc_now(); db.commit()
             updates.put({"type": "result", "ok": False, "message": "Ошибка генерации расписания"})
         finally:
             db.close()
             generation_lock.release()
-
-    threading.Thread(target=run_generation, daemon=True).start()
 
     def events():
         while True:
@@ -1208,6 +1314,8 @@ def stream_generation(term_number: Optional[int] = None):
             if update["type"] == "result":
                 break
 
+    updates.put({"type": "job", "job_id": job.id})
+    threading.Thread(target=run_generation, daemon=True).start()
     return StreamingResponse(events(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
@@ -1893,6 +2001,28 @@ def broadcast_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, cap
     raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
 
 
+def publish_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, caption: str) -> dict:
+    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
+    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
+    if not bot_url or not bot_secret:
+        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
+    query = urlencode({"audience": audience, "filename": filename, "caption": caption})
+    candidates = [bot_url]
+    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
+        candidates.append("http://127.0.0.1:8081")
+    last_network_error = None
+    for candidate in dict.fromkeys(candidates):
+        request = UrlRequest(f"{candidate}/internal/publish-pdf?{query}", data=pdf.getvalue(), headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret}, method="POST")
+        try:
+            with urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise HTTPException(status_code=502, detail="Бот не принял публикацию") from exc
+        except (URLError, TimeoutError) as exc:
+            last_network_error = exc
+    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
+
+
 def save_group_pdf_to_telegram(pdf: io.BytesIO, group_number: int, filename: str, caption: str) -> None:
     """Store a student PDF for one group without creating a broadcast job."""
     bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
@@ -1916,6 +2046,38 @@ def save_group_pdf_to_telegram(pdf: io.BytesIO, group_number: int, filename: str
                 return
         except HTTPError as exc:
             raise HTTPException(status_code=502, detail="Бот не принял расписание группы") from exc
+        except (URLError, TimeoutError) as exc:
+            last_network_error = exc
+    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
+
+
+def publish_student_package_to_telegram(pdf: io.BytesIO, group_pdfs: dict[int, io.BytesIO], filename: str, caption: str) -> dict:
+    """Atomically publish every student PDF as one immutable bot version."""
+    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
+    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
+    if not bot_url or not bot_secret:
+        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
+    payload = io.BytesIO()
+    group_numbers = sorted(group_pdfs)
+    with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr("manifest.json", json.dumps({"filename": filename, "caption": caption, "groups": group_numbers}, ensure_ascii=False))
+        package.writestr("student.pdf", pdf.getvalue())
+        for group_number in group_numbers:
+            package.writestr(f"groups/{group_number}.pdf", group_pdfs[group_number].getvalue())
+    bot_urls = [bot_url]
+    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
+        bot_urls.append("http://127.0.0.1:8081")
+    last_network_error = None
+    for candidate in dict.fromkeys(bot_urls):
+        request = UrlRequest(
+            f"{candidate}/internal/publish-student-package", data=payload.getvalue(),
+            headers={"Content-Type": "application/zip", "X-Bot-Secret": bot_secret}, method="POST",
+        )
+        try:
+            with urlopen(request, timeout=120) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise HTTPException(status_code=502, detail="Бот не принял пакет публикации") from exc
         except (URLError, TimeoutError) as exc:
             last_network_error = exc
     raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
@@ -1949,7 +2111,7 @@ def store_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, caption
     raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
 
 
-def broadcast_student_groups_to_telegram() -> dict:
+def broadcast_student_groups_to_telegram(publication_id: Optional[str] = None) -> dict:
     """Ask the bot to deliver each student the PDF for the group in their profile."""
     bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
     bot_secret = os.getenv("BOT_SHARED_SECRET", "")
@@ -1960,8 +2122,9 @@ def broadcast_student_groups_to_telegram() -> dict:
         bot_urls.append("http://127.0.0.1:8081")
     last_network_error = None
     for candidate in dict.fromkeys(bot_urls):
+        suffix = f"?{urlencode({'publication_id': publication_id})}" if publication_id else ""
         request = UrlRequest(
-            f"{candidate}/internal/broadcast-student-groups",
+            f"{candidate}/internal/broadcast-student-groups{suffix}",
             data=b"",
             headers={"X-Bot-Secret": bot_secret},
             method="POST",
@@ -1985,7 +2148,7 @@ def broadcast_schedule_to_telegram(
     end_date: Optional[date] = None,
     academic_year_id: Optional[int] = None,
     audience: str = "student",
-    _: models.User = Depends(require_user),
+    current: models.User = Depends(require_user),
     db: Session = Depends(database.get_db),
 ):
     if audience not in {"student", "teacher"}:
@@ -2008,13 +2171,19 @@ def broadcast_schedule_to_telegram(
         caption = f"Расписание на неделю № {week_number}"
     pdf = build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date) if audience == "student" else build_teachers_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date)
     if audience == "student":
-        store_pdf_to_telegram(pdf, audience, filename, caption)
         groups = db.query(models.Group).order_by(models.Group.number).all()
+        group_pdfs = {}
         for group in groups:
-            group_pdf = build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date, group.number)
-            save_group_pdf_to_telegram(group_pdf, group.number, f"Расписание группы {group.number}.pdf", caption)
-        return broadcast_student_groups_to_telegram()
-    return broadcast_pdf_to_telegram(pdf, audience, filename, caption)
+            group_pdfs[group.number] = build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date, group.number)
+        result = publish_student_package_to_telegram(pdf, group_pdfs, filename, caption)
+        publication_id = result["publication_id"]
+        write_audit(db, current.id, "publish_schedule", "POST", "/telegram/broadcast-schedule", 200, "publication", publication_id, caption)
+        db.commit()
+        return {**result, "publication_id": publication_id}
+    result = publish_pdf_to_telegram(pdf, audience, filename, caption)
+    write_audit(db, current.id, "publish_schedule", "POST", "/telegram/broadcast-schedule", 200, "broadcast", str(result.get("job_id", "")), caption)
+    db.commit()
+    return result
 
 
 @app.get("/export/schedule.pdf")

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from . import database, models
 
-CURRENT_REVISION = "0002_remove_canceled_lessons"
+CURRENT_REVISION = "0003_jobs_and_audit"
 
 
 def _add_column(engine: Engine, table: str, name: str, definition: str) -> bool:

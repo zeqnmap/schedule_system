@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Date, ForeignKey, DateTime, Text
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -204,3 +204,31 @@ class User(Base):
     role = Column(String, default="user", nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+
+
+class GenerationJob(Base):
+    __tablename__ = "generation_jobs"
+    id = Column(Integer, primary_key=True, index=True)
+    term_number = Column(Integer, nullable=True)
+    status = Column(String, nullable=False, default="queued")
+    completed = Column(Integer, nullable=False, default=0)
+    total = Column(Integer, nullable=False, default=0)
+    message = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    action = Column(String, nullable=False, index=True)
+    method = Column(String, nullable=False)
+    path = Column(String, nullable=False)
+    status_code = Column(Integer, nullable=True)
+    entity_type = Column(String, nullable=True)
+    entity_id = Column(String, nullable=True)
+    details = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False)

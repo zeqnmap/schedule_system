@@ -170,6 +170,14 @@
 
         </div>
 
+        <section class="bento-card p-8 lg:p-10 mt-8">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+                <div><h2 class="text-2xl font-extrabold text-slate-900 tracking-tight">Журнал действий</h2><p class="mt-1 text-sm font-semibold text-slate-500">Последние изменения, генерации и публикации.</p></div>
+                <button @click="fetchAudit" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold">Обновить</button>
+            </div>
+            <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr class="border-b border-slate-200 text-xs uppercase tracking-wider text-slate-400"><th class="py-3 pr-4">Время</th><th class="py-3 pr-4">Пользователь</th><th class="py-3 pr-4">Действие</th><th class="py-3 pr-4">Запрос</th><th class="py-3">Результат</th></tr></thead><tbody><tr v-for="row in auditLogs" :key="row.id" class="border-b border-slate-100"><td class="py-3 pr-4 whitespace-nowrap text-slate-500">{{ row.created_at ? new Date(row.created_at).toLocaleString('ru-RU') : '—' }}</td><td class="py-3 pr-4 font-bold text-slate-700">{{ row.user }}</td><td class="py-3 pr-4 font-semibold text-slate-700">{{ row.action }}</td><td class="py-3 pr-4 font-mono text-xs text-slate-500">{{ row.method }} {{ row.path }}</td><td class="py-3" :class="row.status_code >= 400 ? 'text-rose-600' : 'text-emerald-700'">{{ row.status_code || '—' }}</td></tr><tr v-if="!auditLogs.length"><td colspan="5" class="py-8 text-center font-semibold text-slate-400">Записей пока нет.</td></tr></tbody></table></div>
+        </section>
+
         <Transition name="fade">
             <div v-if="errorMessage" class="fixed bottom-8 right-8 max-w-sm bg-rose-600 text-white p-6 rounded-3xl shadow-2xl z-50 flex items-start gap-4">
                 <div class="flex-1">
