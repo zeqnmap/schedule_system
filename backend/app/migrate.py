@@ -23,8 +23,14 @@ def backup_database() -> Path | None:
         return None
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = source.with_name(f"{source.name}.pre-migration-{stamp}.bak")
-    with sqlite3.connect(source) as src, sqlite3.connect(backup) as dst:
+    src = sqlite3.connect(source)
+    dst = sqlite3.connect(backup)
+    try:
         src.backup(dst)
+        dst.commit()
+    finally:
+        src.close()
+        dst.close()
     return backup
 
 

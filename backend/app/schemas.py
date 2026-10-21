@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Literal, Optional
 from datetime import date
 
@@ -12,8 +12,7 @@ class RoomCreate(RoomBase): pass
 
 class RoomOut(RoomBase):
     id: int
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupBase(BaseModel):
@@ -31,8 +30,7 @@ class GroupCreate(GroupBase): pass
 
 class GroupOut(GroupBase):
     id: int
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupScheduleSetting(BaseModel):
@@ -58,8 +56,7 @@ class TeacherCreate(TeacherBase): pass
 class TeacherOut(TeacherBase):
     id: int
     room_name: Optional[str] = None
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TeacherVacationWeeks(BaseModel):
@@ -86,8 +83,7 @@ class CoursePlanCreate(CoursePlanBase): pass
 
 class CoursePlanOut(CoursePlanBase):
     id: int
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScheduleEntryBase(BaseModel):
@@ -110,8 +106,7 @@ class ScheduleEntryCreate(ScheduleEntryBase): pass
 
 class ScheduleEntryOut(ScheduleEntryBase):
     id: int
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScheduleEntryUpdate(BaseModel):
@@ -128,7 +123,7 @@ class ScheduleEntryUpdate(BaseModel):
     academic_year_id: Optional[int] = None
     schedule_date: Optional[date] = None
 
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ArchivedWeekToggle(BaseModel):
@@ -147,7 +142,7 @@ class ArchivedWeekOut(BaseModel):
     week_number: int
     is_archived: bool
 
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupTermBase(BaseModel):
@@ -171,7 +166,7 @@ class GroupTermOut(GroupTermBase):
     weeks: int
     is_locked: bool
 
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AcademicYearBase(BaseModel):
@@ -186,8 +181,7 @@ class AcademicYearCreate(AcademicYearBase): pass
 
 class AcademicYearOut(AcademicYearBase):
     id: int
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AcademicDayOffCreate(BaseModel):
@@ -198,7 +192,7 @@ class AcademicDayOffCreate(BaseModel):
 
 class AcademicDayOffOut(AcademicDayOffCreate):
     id: int
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupBreakDayCreate(BaseModel):
@@ -210,8 +204,7 @@ class GroupBreakDayCreate(BaseModel):
 
 class GroupBreakDayOut(GroupBreakDayCreate):
     id: int
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupBreakRangeCreate(BaseModel):
@@ -231,7 +224,7 @@ class TeacherVacationCreate(BaseModel):
 
 class TeacherVacationOut(TeacherVacationCreate):
     id: int
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SubjectBase(BaseModel): name: str
@@ -242,8 +235,7 @@ class SubjectCreate(SubjectBase): pass
 
 class SubjectOut(SubjectBase):
     id: int
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GenerateResponse(BaseModel):
@@ -267,8 +259,7 @@ class AlgorithmRuleCreate(AlgorithmRuleBase): pass
 
 class AlgorithmRuleOut(AlgorithmRuleBase):
     id: int
-
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CuratorHourCreate(BaseModel):
@@ -286,7 +277,7 @@ class CuratorHourOut(CuratorHourCreate):
     group_id: Optional[int] = None
     is_active: bool = True
 
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupCuratorHourOverrideCreate(BaseModel):
@@ -301,7 +292,7 @@ class GroupCuratorHourOverrideOut(GroupCuratorHourOverrideCreate):
     group_id: int
     curator_hour_id: int
 
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoginRequest(BaseModel):
@@ -327,4 +318,4 @@ class UserOut(BaseModel):
     role: str
     is_active: bool
 
-    class Config: from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

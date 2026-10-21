@@ -26,7 +26,7 @@ def create_algorithm_rule(data: schemas.AlgorithmRuleCreate, _: models.User = De
         raise HTTPException(status_code=400, detail="Неизвестный режим занятий")
     if data.term_number not in (None, 1, 2):
         raise HTTPException(status_code=400, detail="Можно выбрать только 1-й или 2-й семестр")
-    rule = models.AlgorithmRule(**data.dict(exclude={"subject_name"}), subject_name=data.subject_name.strip())
+    rule = models.AlgorithmRule(**data.model_dump(exclude={"subject_name"}), subject_name=data.subject_name.strip())
     db.add(rule)
     db.commit()
     db.refresh(rule)

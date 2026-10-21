@@ -4,13 +4,10 @@ import json
 import logging
 import queue
 import threading
-import zipfile
 from datetime import date, timedelta, datetime, timezone
 from pathlib import Path
 from typing import List, Optional
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlsplit
-from urllib.request import Request as UrlRequest, urlopen
+from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,9 +25,20 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
 
 from . import models, schemas, database, solver
+from .services.pdf_service import PdfService
+from .services.schedule_validation import entry_room_names, is_physical_education
 from .api.auth import router as auth_router
 from .api.rules import router as rules_router
+from .api.publication import create_publication_router
 from .data_access import common_curator_hour_filter, group_has_classes_on_date, remove_entries_for_dates
+from .services.publication_service import (
+    broadcast_pdf as broadcast_pdf_to_telegram,
+    publish_pdf as publish_pdf_to_telegram,
+    save_group_pdf as save_group_pdf_to_telegram,
+    publish_student_package as publish_student_package_to_telegram,
+    store_pdf as store_pdf_to_telegram,
+    broadcast_student_groups as broadcast_student_groups_to_telegram,
+)
 from .security import (
     ADMIN_ROLE, OWNER_ROLE, SESSION_TTL, can_manage_schedule, current_user,
     hash_password, is_owner, make_session, require_admin, require_owner,
@@ -177,8 +185,8 @@ def legacy_page(page_name: str):
 
 # ----------------- КАБИНЕТЫ (НОВОЕ) -----------------
 @app.post("/rooms/", response_model=schemas.RoomOut)
-def create_room(room: schemas.RoomCreate, db: Session = Depends(database.get_db)):
-    db_room = models.Room(**room.dict())
+def create_room(room: schemas.RoomCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    db_room = models.Room(**room.model_dump())
     db.add(db_room)
     db.commit()
     db.refresh(db_room)
@@ -211,8 +219,8 @@ def delete_room(room_id: int, _: models.User = Depends(require_admin), db: Sessi
 
 # ----------------- ПРЕПОДАВАТЕЛИ -----------------
 @app.post("/teachers/", response_model=schemas.TeacherOut)
-def create_teacher(teacher: schemas.TeacherCreate, db: Session = Depends(database.get_db)):
-    db_teacher = models.Teacher(**teacher.dict())
+def create_teacher(teacher: schemas.TeacherCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    db_teacher = models.Teacher(**teacher.model_dump())
     db.add(db_teacher)
     db.commit()
     db.refresh(db_teacher)
@@ -236,7 +244,7 @@ def update_teacher(teacher_id: int, teacher_data: schemas.TeacherCreate, _: mode
     teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Преподаватель не найден")
-    for key, value in teacher_data.dict().items(): setattr(teacher, key, value)
+    for key, value in teacher_data.model_dump().items(): setattr(teacher, key, value)
     db.commit()
     db.refresh(teacher)
     room = db.query(models.Room).filter(models.Room.id == teacher.room_id).first()
@@ -340,7 +348,7 @@ def create_teacher_vacation(data: schemas.TeacherVacationCreate, response: Respo
         raise HTTPException(status_code=400, detail="Дата окончания отпуска раньше даты начала")
     if not db.query(models.Teacher).filter_by(id=data.teacher_id).first() or not db.query(models.AcademicYear).filter_by(id=data.academic_year_id).first():
         raise HTTPException(status_code=404, detail="Преподаватель или учебный год не найден")
-    vacation = models.TeacherVacation(**data.dict())
+    vacation = models.TeacherVacation(**data.model_dump())
     db.add(vacation)
     removed = remove_entries_for_dates(db, data.academic_year_id, data.start_date, data.end_date, data.teacher_id)
     db.commit(); db.refresh(vacation); response.headers["X-Removed-Schedule-Entries"] = str(removed)
@@ -471,7 +479,7 @@ def create_academic_day_off(data: schemas.AcademicDayOffCreate, response: Respon
     existing = db.query(models.AcademicDayOff).filter_by(academic_year_id=data.academic_year_id, day_date=data.day_date).first()
     if existing:
         return existing
-    day_off = models.AcademicDayOff(**data.dict())
+    day_off = models.AcademicDayOff(**data.model_dump())
     db.add(day_off)
     removed = remove_entries_for_dates(db, data.academic_year_id, data.day_date, data.day_date)
     db.commit(); db.refresh(day_off); response.headers["X-Removed-Schedule-Entries"] = str(removed)
@@ -513,7 +521,7 @@ def create_group_break_day(data: schemas.GroupBreakDayCreate, response: Response
     ).first()
     if existing:
         return existing
-    item = models.GroupBreakDay(**data.dict())
+    item = models.GroupBreakDay(**data.model_dump())
     db.add(item)
     removed = remove_entries_for_dates(
         db, data.academic_year_id, data.day_date, data.day_date, group_id=data.group_id
@@ -584,7 +592,7 @@ def delete_group_break_day(break_day_id: int, _: models.User = Depends(require_a
 @app.post("/groups/", response_model=schemas.GroupOut)
 def create_group(group: schemas.GroupCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     validate_group_curator_assignment(None, group.curator_teacher_id, group.curator_room_name, db)
-    db_group = models.Group(**group.dict())
+    db_group = models.Group(**group.model_dump())
     db.add(db_group)
     db.commit()
     db.refresh(db_group)
@@ -820,7 +828,7 @@ def get_subjects(db: Session = Depends(database.get_db)):
 
 
 @app.post("/subjects/", response_model=schemas.SubjectOut)
-def create_subject(subj: schemas.SubjectCreate, db: Session = Depends(database.get_db)):
+def create_subject(subj: schemas.SubjectCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     db_subj = models.Subject(name=subj.name)
     db.add(db_subj)
     db.commit()
@@ -829,7 +837,7 @@ def create_subject(subj: schemas.SubjectCreate, db: Session = Depends(database.g
 
 
 @app.delete("/subjects/{subject_id}")
-def delete_subject(subject_id: int, db: Session = Depends(database.get_db)):
+def delete_subject(subject_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     db.query(models.Subject).filter(models.Subject.id == subject_id).delete()
     db.commit()
     return {"ok": True}
@@ -844,14 +852,14 @@ def normalize_plan_rooms(plan):
 
 
 @app.post("/course_plans/", response_model=schemas.CoursePlanOut)
-def create_course_plan(plan: schemas.CoursePlanCreate, db: Session = Depends(database.get_db)):
+def create_course_plan(plan: schemas.CoursePlanCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     normalize_plan_rooms(plan)
     if plan.term_id:
         term = db.query(models.GroupTerm).filter_by(id=plan.term_id, group_id=plan.group_id).first()
         if not term:
             raise HTTPException(status_code=400, detail="Выбранный семестр не принадлежит этой группе")
         plan.academic_year_id = term.academic_year_id
-    db_plan = models.CoursePlan(**plan.dict())
+    db_plan = models.CoursePlan(**plan.model_dump())
     db.add(db_plan)
     db.commit()
     db.refresh(db_plan)
@@ -866,7 +874,7 @@ def read_course_plans(skip: int = 0, limit: int = 1000, academic_year_id: Option
 
 
 @app.put("/course_plans/{plan_id}", response_model=schemas.CoursePlanOut)
-def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, db: Session = Depends(database.get_db)):
+def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     normalize_plan_rooms(plan_data)
     plan = db.query(models.CoursePlan).filter(models.CoursePlan.id == plan_id).first()
     if plan_data.term_id and not db.query(models.GroupTerm).filter_by(id=plan_data.term_id, group_id=plan_data.group_id).first():
@@ -892,7 +900,7 @@ def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, db: Se
 
 
 @app.delete("/course_plans/{plan_id}")
-def delete_course_plan(plan_id: int, db: Session = Depends(database.get_db)):
+def delete_course_plan(plan_id: int, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
     db.query(models.CoursePlan).filter(models.CoursePlan.id == plan_id).delete()
     db.commit()
     return {"ok": True}
@@ -1069,7 +1077,7 @@ def create_curator_hour(data: schemas.CuratorHourCreate, _: models.User = Depend
                 raise HTTPException(status_code=409, detail="Этот куратор уже занят в это время")
             if any(item.room_name and data.room_name and item.room_name.strip() == data.room_name.strip() for item in same_time):
                 raise HTTPException(status_code=409, detail="Этот кабинет уже занят кураторским часом")
-    payload = data.dict(exclude={"group_id"})
+    payload = data.model_dump(exclude={"group_id"})
     if payload.get("room_name"):
         payload["room_name"] = payload["room_name"].strip()
     item = models.CuratorHour(**payload, group_id=group_id)
@@ -1112,7 +1120,7 @@ def update_curator_hour(item_id: int, data: schemas.CuratorHourCreate, _: models
                 raise HTTPException(status_code=409, detail="Этот куратор уже занят в это время")
             if any(other.room_name and data.room_name and other.room_name.strip() == data.room_name.strip() for other in same_time):
                 raise HTTPException(status_code=409, detail="Этот кабинет уже занят кураторским часом")
-    for key, value in data.dict(exclude={"group_id"}).items():
+    for key, value in data.model_dump(exclude={"group_id"}).items():
         setattr(item, key, value.strip() if key == "room_name" and value else value)
     item.group_id = group_id
     db.commit(); db.refresh(item)
@@ -1400,35 +1408,11 @@ def get_schedule_available_options(group_id: int, term_id: int, week_number: int
     return {"plans": available_plans, "teachers": sorted(teacher_ids), "rooms": available_rooms}
 
 
-def entry_room_names(entry):
-    return list(dict.fromkeys(
-        name.strip() for name in (entry.room_name, entry.room2_name)
-        if name and name.strip()
-    ))
-
-
-def fit_pdf_cell(text_value: str, width: float, font_name: str = "ScheduleFont", font_size: float = 8) -> str:
-    value = str(text_value or "-")
-    if stringWidth(value, font_name, font_size) <= width:
-        return value
-    suffix = "…"
-    low, high = 0, len(value)
-    while low < high:
-        middle = (low + high + 1) // 2
-        if stringWidth(value[:middle].rstrip() + suffix, font_name, font_size) <= width:
-            low = middle
-        else:
-            high = middle - 1
-    return value[:low].rstrip() + suffix
+fit_pdf_cell = PdfService.fit_cell
 
 
 def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None, group_number: Optional[int] = None):
-    font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
-    if not font_path:
-        raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
-    pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
-    bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
-    pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
+    PdfService.register_schedule_fonts()
     group_query = db.query(models.Group)
     if group_number is not None:
         group_query = group_query.filter(models.Group.number == group_number)
@@ -1598,12 +1582,7 @@ def build_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None,
 
 
 def build_teachers_schedule_pdf(db: Session, week_number: int, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None):
-    font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/Library/Fonts/Arial Unicode.ttf"] if Path(path).exists()), None)
-    if not font_path:
-        raise HTTPException(status_code=500, detail="Не найден шрифт для PDF")
-    pdfmetrics.registerFont(TTFont("ScheduleFont", font_path))
-    bold_font_path = next((path for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"] if Path(path).exists()), font_path)
-    pdfmetrics.registerFont(TTFont("ScheduleFont-Bold", bold_font_path))
+    PdfService.register_schedule_fonts()
     group_records = {group.id: group for group in db.query(models.Group).all()}
     groups = {group_id: group.number for group_id, group in group_records.items()}
     teachers = {teacher.id: teacher.name for teacher in db.query(models.Teacher).all()}
@@ -1970,222 +1949,6 @@ def resolved_export_schedule_date(db: Session, week_number: int, day: Optional[i
     return first_monday + timedelta(days=(week_number - 1) * 7 + day - 1)
 
 
-def broadcast_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, caption: str) -> dict:
-    """Send an already-built schedule PDF to the isolated bot service."""
-    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
-    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
-    if not bot_url or not bot_secret:
-        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
-    query = urlencode({"audience": audience, "filename": filename, "caption": caption})
-    bot_urls = [bot_url]
-    # The compose service name is resolvable only inside the shared Docker
-    # network. The same API is often started locally during administration,
-    # where the bot is exposed on localhost:8081 instead.
-    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
-        bot_urls.append("http://127.0.0.1:8081")
-    last_network_error = None
-    for candidate in dict.fromkeys(bot_urls):
-        request = UrlRequest(
-            f"{candidate}/internal/broadcast-pdf?{query}",
-            data=pdf.getvalue(),
-            headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raise HTTPException(status_code=502, detail="Бот не принял рассылку") from exc
-        except (URLError, TimeoutError) as exc:
-            last_network_error = exc
-    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
-
-
-def publish_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, caption: str) -> dict:
-    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
-    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
-    if not bot_url or not bot_secret:
-        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
-    query = urlencode({"audience": audience, "filename": filename, "caption": caption})
-    candidates = [bot_url]
-    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
-        candidates.append("http://127.0.0.1:8081")
-    last_network_error = None
-    for candidate in dict.fromkeys(candidates):
-        request = UrlRequest(f"{candidate}/internal/publish-pdf?{query}", data=pdf.getvalue(), headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret}, method="POST")
-        try:
-            with urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raise HTTPException(status_code=502, detail="Бот не принял публикацию") from exc
-        except (URLError, TimeoutError) as exc:
-            last_network_error = exc
-    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
-
-
-def save_group_pdf_to_telegram(pdf: io.BytesIO, group_number: int, filename: str, caption: str) -> None:
-    """Store a student PDF for one group without creating a broadcast job."""
-    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
-    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
-    if not bot_url or not bot_secret:
-        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
-    query = urlencode({"group_number": group_number, "filename": filename, "caption": caption})
-    bot_urls = [bot_url]
-    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
-        bot_urls.append("http://127.0.0.1:8081")
-    last_network_error = None
-    for candidate in dict.fromkeys(bot_urls):
-        request = UrlRequest(
-            f"{candidate}/internal/group-schedule?{query}",
-            data=pdf.getvalue(),
-            headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=30):
-                return
-        except HTTPError as exc:
-            raise HTTPException(status_code=502, detail="Бот не принял расписание группы") from exc
-        except (URLError, TimeoutError) as exc:
-            last_network_error = exc
-    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
-
-
-def publish_student_package_to_telegram(pdf: io.BytesIO, group_pdfs: dict[int, io.BytesIO], filename: str, caption: str) -> dict:
-    """Atomically publish every student PDF as one immutable bot version."""
-    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
-    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
-    if not bot_url or not bot_secret:
-        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
-    payload = io.BytesIO()
-    group_numbers = sorted(group_pdfs)
-    with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as package:
-        package.writestr("manifest.json", json.dumps({"filename": filename, "caption": caption, "groups": group_numbers}, ensure_ascii=False))
-        package.writestr("student.pdf", pdf.getvalue())
-        for group_number in group_numbers:
-            package.writestr(f"groups/{group_number}.pdf", group_pdfs[group_number].getvalue())
-    bot_urls = [bot_url]
-    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
-        bot_urls.append("http://127.0.0.1:8081")
-    last_network_error = None
-    for candidate in dict.fromkeys(bot_urls):
-        request = UrlRequest(
-            f"{candidate}/internal/publish-student-package", data=payload.getvalue(),
-            headers={"Content-Type": "application/zip", "X-Bot-Secret": bot_secret}, method="POST",
-        )
-        try:
-            with urlopen(request, timeout=120) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raise HTTPException(status_code=502, detail="Бот не принял пакет публикации") from exc
-        except (URLError, TimeoutError) as exc:
-            last_network_error = exc
-    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
-
-
-def store_pdf_to_telegram(pdf: io.BytesIO, audience: str, filename: str, caption: str) -> None:
-    """Store the original PDF in the bot without starting a broadcast."""
-    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
-    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
-    if not bot_url or not bot_secret:
-        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
-    query = urlencode({"audience": audience, "filename": filename, "caption": caption})
-    bot_urls = [bot_url]
-    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
-        bot_urls.append("http://127.0.0.1:8081")
-    last_network_error = None
-    for candidate in dict.fromkeys(bot_urls):
-        request = UrlRequest(
-            f"{candidate}/internal/store-pdf?{query}",
-            data=pdf.getvalue(),
-            headers={"Content-Type": "application/pdf", "X-Bot-Secret": bot_secret},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=30):
-                return
-        except HTTPError as exc:
-            raise HTTPException(status_code=502, detail="Бот не сохранил PDF") from exc
-        except (URLError, TimeoutError) as exc:
-            last_network_error = exc
-    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
-
-
-def broadcast_student_groups_to_telegram(publication_id: Optional[str] = None) -> dict:
-    """Ask the bot to deliver each student the PDF for the group in their profile."""
-    bot_url = os.getenv("BOT_BROADCAST_URL", "").rstrip("/")
-    bot_secret = os.getenv("BOT_SHARED_SECRET", "")
-    if not bot_url or not bot_secret:
-        raise HTTPException(status_code=503, detail="Telegram-бот ещё не настроен")
-    bot_urls = [bot_url]
-    if urlsplit(bot_url).hostname == "mgkap_schedule_bot":
-        bot_urls.append("http://127.0.0.1:8081")
-    last_network_error = None
-    for candidate in dict.fromkeys(bot_urls):
-        suffix = f"?{urlencode({'publication_id': publication_id})}" if publication_id else ""
-        request = UrlRequest(
-            f"{candidate}/internal/broadcast-student-groups{suffix}",
-            data=b"",
-            headers={"X-Bot-Secret": bot_secret},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raise HTTPException(status_code=502, detail="Бот не поставил персональную рассылку в очередь") from exc
-        except (URLError, TimeoutError) as exc:
-            last_network_error = exc
-    raise HTTPException(status_code=503, detail="Нет связи с Telegram-ботом") from last_network_error
-
-
-@app.post("/telegram/broadcast-schedule")
-def broadcast_schedule_to_telegram(
-    week_number: int = 1,
-    day: Optional[int] = None,
-    schedule_date: Optional[date] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    academic_year_id: Optional[int] = None,
-    audience: str = "student",
-    current: models.User = Depends(require_user),
-    db: Session = Depends(database.get_db),
-):
-    if audience not in {"student", "teacher"}:
-        raise HTTPException(status_code=400, detail="Выберите студентов или преподавателей")
-    if not (start_date and end_date):
-        schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
-    year = db.query(models.AcademicYear).filter_by(id=academic_year_id).first() if academic_year_id else db.query(models.AcademicYear).filter_by(is_active=True).first()
-    week_start = None
-    if year:
-        first_monday = year.start_date - timedelta(days=year.start_date.isoweekday() - 1)
-        week_start = first_monday + timedelta(days=(week_number - 1) * 7)
-    filename = "Расписание.pdf" if audience == "student" else "Расписание преподавателей.pdf"
-    if start_date and end_date:
-        caption = f"Расписание на период: {start_date.strftime('%d.%m.%Y')} - {end_date.strftime('%d.%m.%Y')}"
-    elif day and schedule_date:
-        caption = f"Расписание на {schedule_date.strftime('%d.%m.%Y')}"
-    elif week_start:
-        caption = f"Расписание на неделю: {week_start.strftime('%d.%m.%Y')} - {(week_start + timedelta(days=5)).strftime('%d.%m.%Y')}"
-    else:
-        caption = f"Расписание на неделю № {week_number}"
-    pdf = build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date) if audience == "student" else build_teachers_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date)
-    if audience == "student":
-        groups = db.query(models.Group).order_by(models.Group.number).all()
-        group_pdfs = {}
-        for group in groups:
-            group_pdfs[group.number] = build_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date, group.number)
-        result = publish_student_package_to_telegram(pdf, group_pdfs, filename, caption)
-        publication_id = result["publication_id"]
-        write_audit(db, current.id, "publish_schedule", "POST", "/telegram/broadcast-schedule", 200, "publication", publication_id, caption)
-        db.commit()
-        return {**result, "publication_id": publication_id}
-    result = publish_pdf_to_telegram(pdf, audience, filename, caption)
-    write_audit(db, current.id, "publish_schedule", "POST", "/telegram/broadcast-schedule", 200, "broadcast", str(result.get("job_id", "")), caption)
-    db.commit()
-    return result
-
-
 @app.get("/export/schedule.pdf")
 def export_schedule_pdf(week_number: int = 1, day: Optional[int] = None, schedule_date: Optional[date] = None, academic_year_id: Optional[int] = None, start_date: Optional[date] = None, end_date: Optional[date] = None, _: models.User = Depends(require_user), db: Session = Depends(database.get_db)):
     if not (start_date and end_date): schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
@@ -2198,11 +1961,6 @@ def export_teachers_schedule_pdf(week_number: int = 1, day: Optional[int] = None
     if not (start_date and end_date): schedule_date = resolved_export_schedule_date(db, week_number, day, academic_year_id, schedule_date)
     filename = f"teachers_schedule_{start_date.isoformat()}_{end_date.isoformat()}" if start_date and end_date else f"teachers_schedule_week_{week_number}_{schedule_date.isoformat() if schedule_date else ''}" + (f"_day_{day}" if day else "")
     return StreamingResponse(build_teachers_schedule_pdf(db, week_number, day, schedule_date, academic_year_id, start_date, end_date), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}.pdf"'})
-
-
-def is_physical_education(subject_name: str) -> bool:
-    name = (subject_name or "").casefold()
-    return "физ" in name or "спорт" in name or "здоров" in name
 
 
 def teacher_works_on_day(teacher, day_of_week: int) -> bool:
@@ -2350,7 +2108,7 @@ def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, _: models.Use
     ensure_week_editable(entry_data.group_id, entry_data.week_number, entry_data.academic_year_id, db)
     entry_data.schedule_date = entry_calendar_date(entry_data, db)
     validate_schedule_conflicts(entry_data, db)
-    new_entry = models.ScheduleEntry(**entry_data.dict())
+    new_entry = models.ScheduleEntry(**entry_data.model_dump())
     db.add(new_entry)
     db.commit()
     db.refresh(new_entry)
@@ -2368,7 +2126,7 @@ def update_schedule_entry(entry_id: int, update_data: schemas.ScheduleEntryUpdat
     ensure_week_editable(update_data.group_id, update_data.week_number, update_data.academic_year_id, db)
     update_data.schedule_date = entry_calendar_date(update_data, db)
     validate_schedule_conflicts(update_data, db, exclude_entry_id=entry_id)
-    for key, value in update_data.dict().items(): setattr(entry, key, value)
+    for key, value in update_data.model_dump().items(): setattr(entry, key, value)
     entry.is_generated = False
     db.commit()
     db.refresh(entry)
@@ -2383,6 +2141,15 @@ def delete_schedule_entry(entry_id: int, _: models.User = Depends(require_admin)
     db.delete(entry)
     db.commit()
     return {"ok": True}
+
+app.include_router(create_publication_router(
+    build_schedule_pdf=build_schedule_pdf,
+    build_teachers_schedule_pdf=build_teachers_schedule_pdf,
+    publish_student_package=publish_student_package_to_telegram,
+    publish_pdf=publish_pdf_to_telegram,
+    resolved_export_schedule_date=resolved_export_schedule_date,
+    write_audit=write_audit,
+))
 
 # Frontend is served by the same process, so Docker needs only one service.
 frontend_dir = Path(__file__).resolve().parents[2] / "frontend"

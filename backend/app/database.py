@@ -1,4 +1,5 @@
 import os
+import atexit
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -10,6 +11,7 @@ SQLALCHEMY_DATABASE_URL = os.getenv("SCHEDULE_DATABASE_URL", "sqlite:///./schedu
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
+atexit.register(engine.dispose)
 
 
 @event.listens_for(engine, "connect")

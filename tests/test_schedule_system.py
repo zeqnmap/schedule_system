@@ -106,16 +106,26 @@ class ScheduleSystemTests(unittest.TestCase):
         return SimpleNamespace(room=room, teacher=teacher, group=group, year=year, term=term, plan=plan)
 
     def test_schema_migration_is_recorded_and_idempotent(self):
-        self.assertTrue(migrations.upgrade(self.engine))
-        self.assertEqual(migrations.current_revision(self.engine), migrations.CURRENT_REVISION)
-        self.assertFalse(migrations.upgrade(self.engine))
-        self.assertEqual(migrations.current_revision(self.engine), migrations.CURRENT_REVISION)
+        engine = create_engine(
+            f"sqlite:///{Path(self.temp.name) / 'migration.db'}",
+            connect_args={"check_same_thread": False},
+        )
+        try:
+            self.assertTrue(migrations.upgrade(engine))
+            self.assertEqual(migrations.current_revision(engine), migrations.CURRENT_REVISION)
+            self.assertFalse(migrations.upgrade(engine))
+            self.assertEqual(migrations.current_revision(engine), migrations.CURRENT_REVISION)
+        finally:
+            engine.dispose()
 
     def test_require_current_rejects_unmigrated_engine(self):
         from sqlalchemy import create_engine
         engine = create_engine("sqlite:///:memory:")
-        with self.assertRaisesRegex(RuntimeError, "Run `python -m backend.app.migrate`"):
-            migrations.require_current(engine)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Run `python -m backend.app.migrate`"):
+                migrations.require_current(engine)
+        finally:
+            engine.dispose()
 
     def test_password_hash_verifies_only_original_password(self):
         encoded = main.hash_password("a-long-test-password")
@@ -147,6 +157,231 @@ class ScheduleSystemTests(unittest.TestCase):
         self.assertEqual(response.json()["role"], "admin")
         wrong = self.client.post("/auth/login", json={"login": "dispatch", "password": "wrong-pass"})
         self.assertEqual(wrong.status_code, 401)
+
+    def test_same_origin_schedule_write_reaches_validation_instead_of_middleware(self):
+        response = self.client.post(
+            "/schedule/",
+            headers={"Origin": "http://testserver"},
+            json={},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_editor_cannot_modify_reference_data(self):
+        editor = models.User(login="read-only", password_hash="unused", role="user", is_active=True)
+        self.db.add(editor)
+        self.db.commit()
+        self.client.cookies.set("schedule_session", main.make_session(editor.id))
+        denied = self.client.post("/rooms/", json={"name": "101"})
+        self.assertEqual(denied.status_code, 403)
+        denied = self.client.post("/subjects/", json={"name": "Математика"})
+        self.assertEqual(denied.status_code, 403)
+
+    def test_reference_and_course_plan_crud(self):
+        item = self.fixture(with_plan=False)
+        room = self.client.post("/rooms/", json={"name": "102"})
+        self.assertEqual(room.status_code, 200, room.text)
+        teacher = self.client.post("/teachers/", json={"name": "Новый преподаватель", "room_id": room.json()["id"]})
+        self.assertEqual(teacher.status_code, 200, teacher.text)
+        subject = self.client.post("/subjects/", json={"name": "Новый предмет"})
+        self.assertEqual(subject.status_code, 200, subject.text)
+        plan_payload = {
+            "subject_name": "Новый предмет", "total_hours": 12, "max_weekly_hours": 3,
+            "teacher_id": teacher.json()["id"], "group_id": item.group.id,
+            "room_name": "102", "term_id": item.term.id,
+        }
+        plan = self.client.post("/course_plans/", json=plan_payload)
+        self.assertEqual(plan.status_code, 200, plan.text)
+        self.assertEqual(plan.json()["academic_year_id"], item.year.id)
+        plan_payload["total_hours"] = 16
+        updated = self.client.put(f"/course_plans/{plan.json()['id']}", json=plan_payload)
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["total_hours"], 16)
+        self.assertEqual(self.client.delete(f"/course_plans/{plan.json()['id']}").status_code, 200)
+        self.assertEqual(self.client.delete(f"/subjects/{subject.json()['id']}").status_code, 200)
+
+    def test_academic_year_create_update_and_activate(self):
+        self.fixture(with_plan=False)
+        created = self.client.post("/academic-years/", json={
+            "name": "2027-2028", "start_date": "2027-09-01", "end_date": "2028-08-31", "is_active": False,
+        })
+        self.assertEqual(created.status_code, 200, created.text)
+        updated = self.client.put(f"/academic-years/{created.json()['id']}", json={
+            "name": "2027-2028 обновлён", "start_date": "2027-09-02", "end_date": "2028-08-31", "is_active": False,
+        })
+        self.assertEqual(updated.status_code, 200, updated.text)
+        activated = self.client.post(f"/academic-years/{created.json()['id']}/activate")
+        self.assertEqual(activated.status_code, 200, activated.text)
+        self.assertTrue(activated.json()["is_active"])
+        self.assertEqual(self.db.query(models.AcademicYear).filter_by(is_active=True).count(), 1)
+
+    def test_group_create_update_schedule_settings_and_saturday_toggle(self):
+        self.fixture(with_plan=False)
+        created = self.client.post("/groups/", json={
+            "number": 499, "course": 4, "weekly_hours": 24, "semester_weeks": 18, "has_saturday": False,
+        })
+        self.assertEqual(created.status_code, 200, created.text)
+        group_id = created.json()["id"]
+        updated = self.client.put(f"/groups/{group_id}", json={
+            "number": 499, "course": 4, "weekly_hours": 28, "semester_weeks": 18, "has_saturday": False,
+        })
+        self.assertEqual(updated.status_code, 200, updated.text)
+        settings = self.client.post("/groups/schedule-settings/", json=[{
+            "group_id": group_id, "weekly_hours": 30, "has_saturday": True,
+        }])
+        self.assertEqual(settings.status_code, 200, settings.text)
+        self.assertTrue(settings.json()[0]["has_saturday"])
+        toggled = self.client.post(f"/groups/{group_id}/toggle-saturday")
+        self.assertEqual(toggled.status_code, 200, toggled.text)
+        self.assertFalse(toggled.json()["has_saturday"])
+
+    def test_teacher_vacation_create_delete_and_teacher_update(self):
+        item = self.fixture(with_plan=False)
+        updated = self.client.put(f"/teachers/{item.teacher.id}", json={
+            "name": "Преподаватель 2", "room_id": item.room.id, "working_days": "1,3,5",
+            "max_hours_per_week": 18, "is_active": True, "on_vacation": False, "is_sick": False,
+        })
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["working_days"], "1,3,5")
+        vacation = self.client.post("/teacher-vacations/", json={
+            "teacher_id": item.teacher.id, "academic_year_id": item.year.id,
+            "start_date": "2026-09-01", "end_date": "2026-09-02",
+        })
+        self.assertEqual(vacation.status_code, 200, vacation.text)
+        listed = self.client.get("/teacher-vacations/", params={"academic_year_id": item.year.id})
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertEqual(len(listed.json()), 1)
+        self.assertEqual(self.client.delete(f"/teacher-vacations/{vacation.json()['id']}").status_code, 200)
+
+    def test_archive_week_toggle_for_group_and_all_groups(self):
+        item = self.fixture(with_plan=False)
+        first = self.client.post("/archived-weeks/toggle", json={
+            "group_id": item.group.id, "week_number": 1, "academic_year_id": item.year.id,
+        })
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertTrue(first.json()["is_archived"])
+        all_groups = self.client.post("/archived-weeks/toggle-all", json={
+            "week_number": 1, "academic_year_id": item.year.id,
+        })
+        self.assertEqual(all_groups.status_code, 200, all_groups.text)
+        status = self.client.get("/archived-weeks/status", params={
+            "group_id": item.group.id, "week_number": 1, "academic_year_id": item.year.id,
+        })
+        self.assertEqual(status.status_code, 200, status.text)
+        self.assertIn("is_archived", status.json())
+
+    def test_owner_can_manage_users_but_not_delete_self(self):
+        owner = models.User(login="owner", password_hash="unused", role="owner", is_active=True)
+        self.db.add(owner)
+        self.db.commit()
+        self.client.cookies.set("schedule_session", main.make_session(owner.id))
+        created = self.client.post("/users/", json={"login": "operator", "password": "operator-pass", "role": "user"})
+        self.assertEqual(created.status_code, 200, created.text)
+        changed = self.client.put(f"/users/{created.json()['id']}", json={"role": "admin", "is_active": True})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["role"], "admin")
+        self.assertEqual(self.client.delete(f"/users/{created.json()['id']}").status_code, 200)
+        self.assertEqual(self.client.delete(f"/users/{owner.id}").status_code, 400)
+
+    def test_schedule_entry_create_update_delete_roundtrip(self):
+        item = self.fixture()
+        payload = {
+            "week_number": 1, "day_of_week": 2, "time_slot": 1, "room_name": "101",
+            "teacher_id": item.teacher.id, "teacher2_id": None, "room2_name": None,
+            "group_id": item.group.id, "subject_name": "Математика", "term_id": item.term.id,
+            "academic_year_id": item.year.id,
+        }
+        created = self.client.post("/schedule/", json=payload)
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertEqual(created.json()["schedule_date"], "2026-09-01")
+        payload["time_slot"] = 2
+        updated = self.client.put(f"/schedule/{created.json()['id']}", json=payload)
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["time_slot"], 2)
+        self.assertEqual(self.client.delete(f"/schedule/{created.json()['id']}").status_code, 200)
+        self.assertEqual(self.db.query(models.ScheduleEntry).count(), 0)
+
+    def test_schedule_rejects_group_teacher_and_room_conflicts(self):
+        item = self.fixture()
+        payload = {
+            "week_number": 1, "day_of_week": 2, "time_slot": 1, "room_name": "101",
+            "teacher_id": item.teacher.id, "group_id": item.group.id, "subject_name": "Математика",
+            "term_id": item.term.id, "academic_year_id": item.year.id,
+        }
+        self.assertEqual(self.client.post("/schedule/", json=payload).status_code, 200)
+        self.assertEqual(self.client.post("/schedule/", json=payload).status_code, 409)
+        other_group = models.Group(number=346, course=1)
+        self.db.add(other_group)
+        self.db.flush()
+        other_term = models.GroupTerm(
+            academic_year_id=item.year.id, group_id=other_group.id, term_number=1,
+            name="1 семестр", start_week=1, weeks=1,
+            start_date=date(2026, 9, 1), end_date=date(2026, 9, 7), is_active=True,
+        )
+        self.db.add(other_term)
+        self.db.commit()
+        payload.update(group_id=other_group.id, term_id=other_term.id)
+        self.assertEqual(self.client.post("/schedule/", json=payload).status_code, 409)
+
+    def test_group_term_lock_blocks_edit_and_delete(self):
+        item = self.fixture(with_plan=False)
+        locked = self.client.post(f"/group-terms/{item.term.id}/lock")
+        self.assertEqual(locked.status_code, 200, locked.text)
+        payload = {
+            "group_id": item.group.id, "academic_year_id": item.year.id, "term_number": 1,
+            "name": "1 семестр", "start_date": "2026-09-01", "end_date": "2026-09-07",
+        }
+        self.assertEqual(self.client.put(f"/group-terms/{item.term.id}", json=payload).status_code, 409)
+        self.assertEqual(self.client.delete(f"/group-terms/{item.term.id}").status_code, 409)
+
+    def test_group_break_day_create_delete_and_common_day_exclusion(self):
+        item = self.fixture()
+        common = self.client.post("/academic-days-off/", json={
+            "academic_year_id": item.year.id, "day_date": "2026-09-02", "title": "Общий выходной",
+        })
+        self.assertEqual(common.status_code, 200, common.text)
+        single = self.client.post("/group-break-days/", json={
+            "academic_year_id": item.year.id, "group_id": item.group.id,
+            "day_date": "2026-09-03", "title": "Практика",
+        })
+        self.assertEqual(single.status_code, 200, single.text)
+        self.assertEqual(self.client.delete(f"/group-break-days/{single.json()['id']}").status_code, 200)
+        ranged = self.client.post("/group-break-days/range/", json={
+            "academic_year_id": item.year.id, "group_id": item.group.id,
+            "start_date": "2026-09-01", "end_date": "2026-09-03", "title": "Практика",
+        })
+        self.assertEqual(ranged.status_code, 200, ranged.text)
+        self.assertEqual({entry["day_date"] for entry in ranged.json()}, {"2026-09-01", "2026-09-03"})
+
+    def test_algorithm_rule_and_curator_hour_crud(self):
+        item = self.fixture()
+        rule = self.client.post("/algorithm-rules/", json={
+            "subject_name": "Математика", "group_id": item.group.id, "course": None,
+            "term_number": 1, "weekly_hours": 2, "lesson_mode": "lessons",
+        })
+        self.assertEqual(rule.status_code, 200, rule.text)
+        self.assertEqual(self.client.delete(f"/algorithm-rules/{rule.json()['id']}").status_code, 200)
+        hour = self.client.post("/curator-hours/", json={
+            "group_id": item.group.id, "day_of_week": 4, "time_slot": 6,
+            "duration": 1, "teacher_id": item.teacher.id, "room_name": "101",
+        })
+        self.assertEqual(hour.status_code, 200, hour.text)
+        updated = self.client.put(f"/curator-hours/{hour.json()['id']}", json={
+            "group_id": item.group.id, "day_of_week": 4, "time_slot": 7,
+            "duration": 1, "teacher_id": item.teacher.id, "room_name": "101",
+        })
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(self.client.delete(f"/curator-hours/{hour.json()['id']}").status_code, 200)
+
+    def test_algorithm_calendar_has_one_scope_switchable_table(self):
+        project = Path(__file__).resolve().parents[1]
+        markup = (project / "frontend/html/algorithm_settings.html").read_text(encoding="utf-8")
+        script = (project / "frontend/js/algorithm-settings.js").read_text(encoding="utf-8")
+        self.assertEqual(markup.count("calendar-management-card"), 1)
+        self.assertIn('<option value="all">Все группы</option>', markup)
+        self.assertNotIn("breakCalendarDays", markup)
+        self.assertIn("selectCalendarScope", script)
+        self.assertIn("toggleCalendarDay", script)
+        self.assertNotIn("breakCalendarMonth", script)
 
     def test_pydantic_rejects_out_of_range_schedule_coordinates(self):
         base = dict(week_number=1, day_of_week=1, time_slot=1, room_name="101", group_id=1, subject_name="Math")
