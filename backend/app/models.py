@@ -6,6 +6,9 @@ class Room(Base):
     __tablename__ = "rooms"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
+    # Number of independent groups that can use this resource in one slot.
+    # It is intentionally a resource property, not a naming convention.
+    max_simultaneous_groups = Column(Integer, default=1, nullable=False)
 
 class Teacher(Base):
     __tablename__ = "teachers"
@@ -54,6 +57,10 @@ class CoursePlan(Base):
     room2_name = Column(String, nullable=True)
     term_id = Column(Integer, ForeignKey("group_terms.id"), nullable=True, index=True)
     academic_year_id = Column(Integer, ForeignKey("academic_years.id"), nullable=True, index=True)
+    # These flags make generation policy explicit for every plan.  They avoid
+    # inferring operational rules from a subject or room name.
+    auto_schedule = Column(Boolean, default=True, nullable=False)
+    requires_room = Column(Boolean, default=True, nullable=False)
 
     group = relationship("Group", back_populates="course_plans")
     teacher = relationship("Teacher", foreign_keys=[teacher_id])

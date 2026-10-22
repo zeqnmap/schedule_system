@@ -5,9 +5,13 @@ from datetime import date
 
 class RoomBase(BaseModel):
     name: str
+    max_simultaneous_groups: int = Field(default=1, ge=1, le=100)
 
 
 class RoomCreate(RoomBase): pass
+
+
+class RoomUpdate(RoomBase): pass
 
 
 class RoomOut(RoomBase):
@@ -76,6 +80,8 @@ class CoursePlanBase(BaseModel):
     room2_name: Optional[str] = None
     term_id: Optional[int] = None
     academic_year_id: Optional[int] = None
+    auto_schedule: bool = True
+    requires_room: bool = True
 
 
 class CoursePlanCreate(CoursePlanBase): pass

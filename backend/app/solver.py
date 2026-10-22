@@ -27,22 +27,6 @@ MIN_LESSONS_ON_STARTED_DAY = 4
 # deterministic choice whenever moving it earlier does not create a conflict.
 EARLY_SLOT_WEIGHT = 10_000
 LESSON_MODES = {"auto", "lessons", "pairs", "pair_and_lesson"}
-NON_CLASSROOM_SUBJECTS = {"преддипломная", "технологическая"}
-
-
-def is_pe_subject(subject_name: str) -> bool:
-    name = (subject_name or "").casefold()
-    return any(token in name for token in ("физ", "спорт", "здоров"))
-
-
-def is_sports_room(room_name: str) -> bool:
-    name = (room_name or "").casefold()
-    return any(token in name for token in ("спорт", "физкульт", "зал"))
-
-
-def is_non_classroom_plan(subject_name: str) -> bool:
-    name = (subject_name or "").strip().casefold()
-    return name in NON_CLASSROOM_SUBJECTS or name.startswith("практикум")
 
 
 def get_teacher_working_days(teacher) -> set[int]:
@@ -156,7 +140,7 @@ def build_subject_demands(db, groups, course_plans, rules, week, terms_by_group,
     groups_by_id = {group.id: group for group in groups if group.id not in archived}
     demands = []
     for plan in course_plans:
-        if is_non_classroom_plan(plan.subject_name):
+        if not bool(getattr(plan, "auto_schedule", True)):
             continue
         group = groups_by_id.get(plan.group_id)
         term = terms_by_group.get(plan.group_id)
@@ -243,7 +227,8 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
     }
     days_off = {(item.academic_year_id, item.day_date) for item in db.query(models.AcademicDayOff).all()}
     group_breaks = {(item.group_id, item.academic_year_id, item.day_date) for item in db.query(models.GroupBreakDay).all()}
-    blocked, curator_teacher_slots, curator_room_slots = set(), set(), set()
+    blocked, curator_teacher_slots = set(), set()
+    curator_room_slot_counts = {}
     # Common settings stay unchanged; a manual group override only changes this
     # group's card and the resources reserved by that particular card.
     for group in groups:
@@ -269,8 +254,9 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                 blocked.add((group.id, item.day_of_week - 1, slot))
                 if teacher_id:
                     curator_teacher_slots.add((teacher_id, item.day_of_week - 1, slot))
-                if room_name:
-                    curator_room_slots.add((room_name.strip(), item.day_of_week - 1, slot))
+                if room_name and room_name.strip() != "Без кабинета":
+                    resource_slot = (room_name.strip(), item.day_of_week - 1, slot)
+                    curator_room_slot_counts[resource_slot] = curator_room_slot_counts.get(resource_slot, 0) + 1
 
     model = cp_model.CpModel()
     lesson, pair, single, pair_starts = {}, {}, {}, {}
@@ -290,12 +276,11 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
         for teacher_id in (entry.teacher_id, entry.teacher2_id)
         if teacher_id
     }
-    fixed_room_slots = {
-        (room_name.strip(), entry.day_of_week - 1, entry.time_slot - 1)
-        for entry in fixed_entries
-        for room_name in (entry.room_name, entry.room2_name)
-        if room_name and room_name.strip()
-    }
+    fixed_room_slot_counts = {}
+    for entry in fixed_entries:
+        for room_name in {name.strip() for name in (entry.room_name, entry.room2_name) if name and name.strip() != "Без кабинета"}:
+            resource_slot = (room_name, entry.day_of_week - 1, entry.time_slot - 1)
+            fixed_room_slot_counts[resource_slot] = fixed_room_slot_counts.get(resource_slot, 0) + 1
     vacation_dates = {
         (vacation.teacher_id, vacation.academic_year_id, day)
         for vacation in vacations
@@ -467,22 +452,32 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
         for teacher in teachers
     }
     plan_rooms = {
-        demand.id: {
-            name.strip() for name in (
-                demand.plan.room_name or room_by_teacher.get(demand.plan.teacher_id),
-                demand.plan.room2_name or room_by_teacher.get(demand.plan.teacher2_id),
-            ) if name and name.strip()
-        }
+        demand.id: (
+            {
+                name.strip() for name in (
+                    demand.plan.room_name or room_by_teacher.get(demand.plan.teacher_id),
+                    demand.plan.room2_name or room_by_teacher.get(demand.plan.teacher2_id),
+                ) if name and name.strip()
+            }
+            if bool(getattr(demand.plan, "requires_room", True)) else set()
+        )
         for demand in demands
     }
+    room_capacities = {
+        room.name.strip(): max(1, int(getattr(room, "max_simultaneous_groups", 1) or 1))
+        for room in rooms if room.name and room.name.strip()
+    }
+    for resource_names in plan_rooms.values():
+        for room_name in resource_names:
+            room_capacities.setdefault(room_name, 1)
     room_demands = {
-        room.name: [
+        room_name: [
             (group, demand)
             for group in groups
             for demand in group_demands[group.id]
-            if room.name in plan_rooms[demand.id]
+            if room_name in plan_rooms[demand.id]
         ]
-        for room in rooms
+        for room_name in room_capacities
     }
 
     for day in range(DAY_COUNT):
@@ -510,24 +505,19 @@ def make_model(db, week, groups, teachers, rooms, demands, strict_load, terms_by
                         if day < days_by_group[group.id] and (teacher.id, day, slot) in curator_teacher_slots:
                             model.Add(lesson[group.id, day, slot, demand.id] == 0)
 
-            for room in rooms:
-                regular, sports = [], []
-                for group, demand in room_demands[room.name]:
+            for room_name, capacity in room_capacities.items():
+                variables = []
+                for group, demand in room_demands[room_name]:
                     if day >= days_by_group[group.id]:
                         continue
                     variable = lesson[group.id, day, slot, demand.id]
-                    if is_pe_subject(demand.plan.subject_name) and is_sports_room(room.name):
-                        sports.append(variable)
-                    else:
-                        regular.append(variable)
-                    if (room.name.strip(), day, slot) in curator_room_slots:
-                        model.Add(variable == 0)
-                if regular:
-                    model.Add(sum(regular + sports) <= 1)
-                elif sports:
-                    model.Add(sum(sports) <= 2)
-                if (room.name.strip(), day, slot) in fixed_room_slots:
-                    for variable in regular + sports: model.Add(variable == 0)
+                    variables.append(variable)
+                occupied = (
+                    fixed_room_slot_counts.get((room_name, day, slot), 0)
+                    + curator_room_slot_counts.get((room_name, day, slot), 0)
+                )
+                if variables:
+                    model.Add(sum(variables) + occupied <= capacity)
 
     # A teacher's weekly limit is also a hard constraint. Co-teaching still
     # counts as one conducted lesson for each of the two teachers.
@@ -633,8 +623,14 @@ def solve_global_week(db: Session, week: int, groups, teachers, rooms, course_pl
                             week_number=week,
                             day_of_week=day + 1,
                             time_slot=slot + 1,
-                            room_name=demand.plan.room_name or room_by_teacher.get(demand.plan.teacher_id) or "Без кабинета",
-                            room2_name=demand.plan.room2_name or room_by_teacher.get(demand.plan.teacher2_id),
+                            room_name=(
+                                demand.plan.room_name or room_by_teacher.get(demand.plan.teacher_id) or "Без кабинета"
+                                if bool(getattr(demand.plan, "requires_room", True)) else "Без кабинета"
+                            ),
+                            room2_name=(
+                                demand.plan.room2_name or room_by_teacher.get(demand.plan.teacher2_id)
+                                if bool(getattr(demand.plan, "requires_room", True)) else None
+                            ),
                             teacher_id=demand.plan.teacher_id,
                             teacher2_id=demand.plan.teacher2_id,
                             group_id=group.id,
@@ -737,7 +733,7 @@ def trigger_global_generation(
     shortages = []
     consumed = consumed_hours_by_plan(db)
     for plan in course_plans:
-        if is_non_classroom_plan(plan.subject_name):
+        if not bool(getattr(plan, "auto_schedule", True)):
             continue
         missing = max(0, planned_lessons(plan) - consumed.get((plan.group_id, plan.subject_name, plan.term_id), 0))
         if missing:

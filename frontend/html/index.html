@@ -11,7 +11,7 @@
     <script src="../js/searchable-select.js"></script>
     <script src="../js/auth.js" defer></script>
     <script src="../js/app-nav.js?v=20260933" defer></script>
-    <script src="../js/index.js?v=20261021-broadcast-count" defer></script>
+    <script src="../js/index.js?v=20261021-resource-capacity" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body class="page-schedule text-slate-800 antialiased min-h-screen">
@@ -298,7 +298,7 @@
                                     placeholder="--- Нет ---" search-placeholder="Найти преподавателя..." class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer"></searchable-select>
                             </div>
                         </div>
-                        <div class="grid grid-cols-2 gap-4">
+                        <div v-if="selectedPlan?.requires_room !== false" class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-[11px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">Кабинет 1</label>
                                 <select v-model="form.room_name" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-sm cursor-pointer" required>
@@ -314,6 +314,7 @@
                                 </select>
                             </div>
                         </div>
+                        <div v-else class="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm font-bold text-slate-500">Для этого плана кабинет не учитывается.</div>
                     </div>
 
                     <div class="p-8 border-t border-slate-100 flex flex-wrap gap-4 justify-between items-center bg-white">

@@ -3,10 +3,11 @@ createApp({ setup() {
     const groups = ref([]), subjects = ref([]), teachers = ref([]), rooms = ref([]), plans = ref([]), terms = ref([]), auditLogs = ref([]);
     const editingPlanId = ref(null);
     const selectedGroupId = ref(null), selectedTermId = ref(null), filterGroupSearch = ref('');
-    const emptyForm = () => ({ group_id: null, term_id: null, subject_name: '', total_hours: null, max_weekly_hours: 4, teacher_id: null, teacher2_id: null, teacher_hours: null, teacher2_hours: null, room_name: null, room2_name: null });
+    const emptyForm = () => ({ group_id: null, term_id: null, subject_name: '', total_hours: null, max_weekly_hours: 4, teacher_id: null, teacher2_id: null, teacher_hours: null, teacher2_hours: null, room_name: null, room2_name: null, auto_schedule: true, requires_room: true });
     const form = ref(emptyForm());
     const availableSecondRooms = computed(() => rooms.value.filter(room => room.name !== form.value.room_name));
     watch(() => form.value.room_name, roomName => { if (form.value.room2_name === roomName) form.value.room2_name = null; });
+    watch(() => form.value.requires_room, requiresRoom => { if (!requiresRoom) { form.value.room_name = null; form.value.room2_name = null; } });
     const errorMessage = ref('');
     const fetchAudit = async () => { const response = await fetch('/audit-logs?limit=100'); if (response.ok) auditLogs.value = await response.json(); };
     const fetchData = async () => { try {
@@ -37,7 +38,7 @@ createApp({ setup() {
         const res = await fetch(url, { method: editingPlanId.value ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form.value) });
         if (res.ok) { resetForm(); await fetchData(); } else errorMessage.value = (await res.json()).detail || 'Ошибка сохранения плана';
     } catch (e) { errorMessage.value = 'Ошибка связи с сервером'; } };
-    const editPlan = p => { editingPlanId.value = p.id; form.value = { ...p }; };
+    const editPlan = p => { editingPlanId.value = p.id; form.value = { ...p, auto_schedule: p.auto_schedule !== false, requires_room: p.requires_room !== false }; };
     const resetForm = () => { editingPlanId.value = null; form.value = emptyForm(); };
     const deletePlan = async id => { if (!confirm('Точно удалить этот план?')) return; await fetch(`/course_plans/${id}`, { method: 'DELETE' }); fetchData(); };
     return { groups, subjects, teachers, rooms, availableSecondRooms, plans, terms, auditLogs, form, editingPlanId, errorMessage, selectedGroupId, selectedTermId, filterGroupSearch, filteredGroups, availableFilterTerms, filteredPlans, termsForForm, getTermName, formatDate, savePlan, editPlan, resetForm, deletePlan, getGroupNumber, getTeacherName, fetchAudit };

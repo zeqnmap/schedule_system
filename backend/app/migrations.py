@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from . import database, models
 
-CURRENT_REVISION = "0003_jobs_and_audit"
+CURRENT_REVISION = "0004_resource_configuration"
 
 
 def _add_column(engine: Engine, table: str, name: str, definition: str) -> bool:
@@ -53,6 +53,9 @@ def _apply_0001(engine: Engine) -> None:
         ("schedule_entries", "room2_name", "VARCHAR"),
         ("schedule_entries", "is_generated", "BOOLEAN DEFAULT 0 NOT NULL"),
         ("schedule_entries", "schedule_date", "DATE"),
+        ("rooms", "max_simultaneous_groups", "INTEGER DEFAULT 1 NOT NULL"),
+        ("course_plans", "auto_schedule", "BOOLEAN DEFAULT 1 NOT NULL"),
+        ("course_plans", "requires_room", "BOOLEAN DEFAULT 1 NOT NULL"),
     ):
         added = _add_column(engine, table, name, definition)
         if table == "group_curator_hour_overrides" and name == "schedule_date" and added:

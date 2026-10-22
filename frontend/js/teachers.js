@@ -11,7 +11,8 @@ createApp({
             { id: 4, name: 'Чт' }, { id: 5, name: 'Пт' }, { id: 6, name: 'Сб' }
         ];
         const defaultWorkingDays = [1, 2, 3, 4, 5];
-        const newRoom = ref({ name: '' });
+        const newRoom = ref({ name: '', max_simultaneous_groups: 1 });
+        const editingRoomId = ref(null);
         const newTeacher = ref({ name: '', room_id: null, max_hours_per_week: 30, working_days: defaultWorkingDays });
         const editingTeacherId = ref(null);
         const vacationEditorId = ref(null);
@@ -47,11 +48,14 @@ createApp({
         const saveRoom = async () => {
             const trimmedName = newRoom.value.name.trim();
             if (!trimmedName) return;
-            const response = await fetch('/rooms/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmedName }) });
+            const payload = { name: trimmedName, max_simultaneous_groups: Number(newRoom.value.max_simultaneous_groups) || 1 };
+            const response = await fetch(editingRoomId.value ? `/rooms/${editingRoomId.value}` : '/rooms/', { method: editingRoomId.value ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (!response.ok) { errorMessage.value = (await response.json().catch(() => ({}))).detail || 'Не удалось сохранить кабинет'; return; }
-            newRoom.value.name = '';
+            resetRoomForm();
             fetchData();
         };
+        const editRoom = room => { editingRoomId.value = room.id; newRoom.value = { name: room.name, max_simultaneous_groups: room.max_simultaneous_groups || 1 }; };
+        const resetRoomForm = () => { editingRoomId.value = null; newRoom.value = { name: '', max_simultaneous_groups: 1 }; };
         const deleteRoom = async id => {
             if (!confirm('Точно удалить этот кабинет?')) return;
             await fetch(`/rooms/${id}`, { method: 'DELETE' });
@@ -97,6 +101,6 @@ createApp({
         const previousVacationMonth = () => { const value = selectedVacationMonth.value; vacationMonth.value = localDate(new Date(value.getFullYear(), value.getMonth() - 1, 1)).slice(0, 7); };
         const nextVacationMonth = () => { const value = selectedVacationMonth.value; vacationMonth.value = localDate(new Date(value.getFullYear(), value.getMonth() + 1, 1)).slice(0, 7); };
 
-        return { rooms, teachers, weekDays, newRoom, newTeacher, editingTeacherId, vacationEditorId, vacationForm, activeYear, vacationMonth, vacationMonthTitle, vacationCalendarDays, availableRooms, saveRoom, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacation, deleteVacation, selectVacationDate, previousVacationMonth, nextVacationMonth, teacherVacations, getRoomName, getRoomOccupant, formatWorkingDays, workload, errorMessage };
+        return { rooms, teachers, weekDays, newRoom, editingRoomId, newTeacher, editingTeacherId, vacationEditorId, vacationForm, activeYear, vacationMonth, vacationMonthTitle, vacationCalendarDays, availableRooms, saveRoom, editRoom, resetRoomForm, deleteRoom, saveTeacher, editTeacher, resetTeacherForm, deleteTeacher, openVacationEditor, closeVacationEditor, saveVacation, deleteVacation, selectVacationDate, previousVacationMonth, nextVacationMonth, teacherVacations, getRoomName, getRoomOccupant, formatWorkingDays, workload, errorMessage };
     }
 }).component('searchable-select', SearchableSelect).mount('#app');

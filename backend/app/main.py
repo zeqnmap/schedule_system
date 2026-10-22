@@ -26,7 +26,7 @@ from sqlalchemy import or_, text
 
 from . import models, schemas, database, solver
 from .services.pdf_service import PdfService
-from .services.schedule_validation import entry_room_names, is_physical_education
+from .services.schedule_validation import entry_room_names
 from .api.auth import router as auth_router
 from .api.rules import router as rules_router
 from .api.publication import create_publication_router
@@ -100,6 +100,12 @@ require_current()
 
 app = FastAPI(title="Schedule System API")
 
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    # The UI uses no branded icon yet, but browsers should not log a noisy 404.
+    return Response(status_code=204)
+
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
@@ -108,7 +114,7 @@ app.include_router(rules_router)
 
 @app.middleware("http")
 async def protect_site(request: Request, call_next):
-    public_paths = {"/login.html", "/html/login.html", "/auth/login", "/docs", "/openapi.json", "/redoc"}
+    public_paths = {"/login.html", "/html/login.html", "/auth/login", "/docs", "/openapi.json", "/redoc", "/favicon.ico"}
     public_asset = request.url.path.endswith((".js", ".css"))
     audit_user_id = None
     if request.url.path not in public_paths and not public_asset and not request.url.path.startswith(("/docs/", "/redoc/")):
@@ -196,6 +202,30 @@ def create_room(room: schemas.RoomCreate, _: models.User = Depends(require_admin
 @app.get("/rooms/", response_model=List[schemas.RoomOut])
 def read_rooms(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
     return db.query(models.Room).offset(skip).limit(limit).all()
+
+
+@app.put("/rooms/{room_id}", response_model=schemas.RoomOut)
+def update_room(room_id: int, room_data: schemas.RoomUpdate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):
+    room = db.query(models.Room).filter_by(id=room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Кабинет не найден")
+    normalized_name = room_data.name.strip()
+    if not normalized_name:
+        raise HTTPException(status_code=400, detail="Укажите название кабинета")
+    duplicate = db.query(models.Room).filter(models.Room.name == normalized_name, models.Room.id != room_id).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Кабинет с таким названием уже существует")
+    # A rename is unsafe once the text name is referenced by plans or history.
+    if normalized_name != room.name and (
+        db.query(models.CoursePlan).filter(or_(models.CoursePlan.room_name == room.name, models.CoursePlan.room2_name == room.name)).first()
+        or db.query(models.ScheduleEntry).filter(or_(models.ScheduleEntry.room_name == room.name, models.ScheduleEntry.room2_name == room.name)).first()
+    ):
+        raise HTTPException(status_code=409, detail="Нельзя переименовать кабинет, пока он используется в плане или расписании")
+    room.name = normalized_name
+    room.max_simultaneous_groups = room_data.max_simultaneous_groups
+    db.commit()
+    db.refresh(room)
+    return room
 
 
 @app.delete("/rooms/{room_id}")
@@ -847,6 +877,10 @@ def delete_subject(subject_id: int, _: models.User = Depends(require_admin), db:
 def normalize_plan_rooms(plan):
     plan.room_name = (plan.room_name or "").strip() or None
     plan.room2_name = (plan.room2_name or "").strip() or None
+    if not plan.requires_room:
+        plan.room_name = None
+        plan.room2_name = None
+        return
     if plan.room_name and plan.room_name == plan.room2_name:
         raise HTTPException(status_code=400, detail="Выберите разные кабинеты для дисциплины")
 
@@ -889,6 +923,8 @@ def update_course_plan(plan_id: int, plan_data: schemas.CoursePlanCreate, _: mod
     plan.teacher2_hours = plan_data.teacher2_hours
     plan.room_name = plan_data.room_name
     plan.room2_name = plan_data.room2_name
+    plan.auto_schedule = plan_data.auto_schedule
+    plan.requires_room = plan_data.requires_room
     plan.term_id = plan_data.term_id
     if plan_data.term_id:
         plan.academic_year_id = db.query(models.GroupTerm).filter_by(id=plan_data.term_id).first().academic_year_id
@@ -1363,7 +1399,11 @@ def get_schedule_available_options(group_id: int, term_id: int, week_number: int
     if any(entry.group_id == group_id for entry in entries):
         return {"plans": [], "teachers": [], "rooms": []}
     reserved_teachers = {teacher_id for entry in entries for teacher_id in (entry.teacher_id, entry.teacher2_id) if teacher_id}
-    reserved_rooms = {room for entry in entries for room in entry_room_names(entry) if room != "Без кабинета"}
+    room_occupancy = {}
+    for entry in entries:
+        for room_name in entry_room_names(entry):
+            if room_name != "Без кабинета":
+                room_occupancy[room_name] = room_occupancy.get(room_name, 0) + 1
     hours = db.query(models.CuratorHour).filter(
         models.CuratorHour.is_active.is_(True),
         models.CuratorHour.day_of_week == day_of_week,
@@ -1390,19 +1430,34 @@ def get_schedule_available_options(group_id: int, term_id: int, week_number: int
             if teacher_id:
                 reserved_teachers.add(teacher_id)
             if room:
-                reserved_rooms.add(room.strip())
+                room_name = room.strip()
+                if room_name != "Без кабинета":
+                    room_occupancy[room_name] = room_occupancy.get(room_name, 0) + 1
     available_teachers = [teacher for teacher in db.query(models.Teacher).filter_by(is_active=True).all()
                           if teacher.id not in reserved_teachers and teacher_works_on_day(teacher, day_of_week)
                           and not teacher_is_on_vacation(teacher, week_number)
                           and not is_teacher_on_date_vacation(teacher.id, term.academic_year_id, target_date, db)]
     teacher_ids = {teacher.id for teacher in available_teachers}
+    room_capacities = {
+        room.name.strip(): max(1, int(room.max_simultaneous_groups or 1))
+        for room in db.query(models.Room).all()
+    }
     plans = db.query(models.CoursePlan).filter_by(group_id=group_id, term_id=term_id).all()
     available_plans = [
         plan.id for plan in plans
         if all(teacher_id in teacher_ids for teacher_id in (plan.teacher_id, plan.teacher2_id) if teacher_id)
-        and all(room not in reserved_rooms for room in entry_room_names(plan) if room != "Без кабинета")
+        and (
+            not plan.requires_room
+            or all(
+                room_occupancy.get(room, 0) < room_capacities.get(room, 1)
+                for room in entry_room_names(plan) if room != "Без кабинета"
+            )
+        )
     ]
-    available_rooms = [room.name for room in db.query(models.Room).all() if room.name.strip() not in reserved_rooms]
+    available_rooms = [
+        room.name for room in db.query(models.Room).all()
+        if room_occupancy.get(room.name.strip(), 0) < max(1, int(room.max_simultaneous_groups or 1))
+    ]
     if "Без кабинета" not in available_rooms:
         available_rooms.append("Без кабинета")
     return {"plans": available_plans, "teachers": sorted(teacher_ids), "rooms": available_rooms}
@@ -2056,6 +2111,7 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
         (item.group_id, item.curator_hour_id): item
         for item in db.query(models.GroupCuratorHourOverride).filter_by(schedule_date=target_date).all()
     }
+    curator_room_occupancy = {}
     for hour in same_time_curators:
         target_groups = db.query(models.Group).all() if not hour.group_id else db.query(models.Group).filter_by(id=hour.group_id).all()
         for curator_group in target_groups:
@@ -2068,8 +2124,9 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
             curator_room = override.room_name if override and override.room_name is not None else (hour.room_name or curator_group.curator_room_name)
             if curator_teacher in teacher_ids:
                 raise HTTPException(status_code=409, detail="Преподаватель занят кураторским часом")
-            if curator_room and curator_room.strip() in requested_rooms:
-                raise HTTPException(status_code=409, detail="Кабинет занят кураторским часом")
+            if curator_room and curator_room.strip() != "Без кабинета":
+                room_name = curator_room.strip()
+                curator_room_occupancy[room_name] = curator_room_occupancy.get(room_name, 0) + 1
     query = db.query(models.ScheduleEntry).filter(
         models.ScheduleEntry.academic_year_id == data.academic_year_id,
         models.ScheduleEntry.week_number == data.week_number,
@@ -2088,17 +2145,13 @@ def validate_schedule_conflicts(data: schemas.ScheduleEntryBase, db: Session, ex
             raise HTTPException(status_code=409, detail="Преподаватель уже занят в этот день и этот урок")
     for room_name in requested_rooms:
         occupied = [entry for entry in entries if room_name in entry_room_names(entry)]
-        if not occupied:
-            continue
-        shared_pe = (
-            solver.is_sports_room(room_name)
-            and is_physical_education(data.subject_name)
-            and all(is_physical_education(entry.subject_name) for entry in occupied)
-        )
-        if not shared_pe:
-            raise HTTPException(status_code=409, detail=f"Кабинет {room_name} уже занят в этот день и этот урок")
-        if len(occupied) >= 2:
-            raise HTTPException(status_code=409, detail="В одном спортивном зале одновременно допустимы максимум две группы")
+        room = db.query(models.Room).filter_by(name=room_name).first()
+        capacity = max(1, int(room.max_simultaneous_groups or 1)) if room else 1
+        if len(occupied) + curator_room_occupancy.get(room_name, 0) >= capacity:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Кабинет {room_name} уже достиг лимита: {capacity} групп(ы) одновременно",
+            )
 
 @app.post("/schedule/", response_model=schemas.ScheduleEntryOut)
 def create_schedule_entry(entry_data: schemas.ScheduleEntryCreate, _: models.User = Depends(require_admin), db: Session = Depends(database.get_db)):

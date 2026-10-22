@@ -422,12 +422,10 @@ class ScheduleSystemTests(unittest.TestCase):
         self.assertEqual(solver.find_rule_for_plan(plan, group, rules, 1), rules[1])
         self.assertEqual(solver.find_rule_for_plan(plan, group, rules, 2), rules[2])
 
-    def test_subject_classification_and_mode_limits(self):
-        self.assertTrue(solver.is_non_classroom_plan("Преддипломная"))
-        self.assertTrue(solver.is_non_classroom_plan("Практикум сварщика"))
-        self.assertFalse(solver.is_non_classroom_plan("Математика"))
-        self.assertTrue(solver.is_pe_subject("Физическая культура"))
-        self.assertTrue(solver.is_sports_room("Спортивный зал"))
+    def test_explicit_generation_policy_and_mode_limits(self):
+        plan = SimpleNamespace(auto_schedule=False, requires_room=False)
+        self.assertFalse(plan.auto_schedule)
+        self.assertFalse(plan.requires_room)
         self.assertEqual(solver.mode_limits(SimpleNamespace(mode="pairs"), 5), (2, 1))
         self.assertEqual(solver.mode_limits(SimpleNamespace(mode="lessons"), 3), (0, 3))
 
@@ -465,14 +463,122 @@ class ScheduleSystemTests(unittest.TestCase):
         self.assertEqual(len({(e.teacher_id, e.day_of_week, e.time_slot) for e in entries}), len(entries))
         self.assertEqual(len({(e.room_name, e.day_of_week, e.time_slot) for e in entries}), len(entries))
 
-    def test_cp_sat_skips_non_classroom_practice(self):
+    def test_cp_sat_uses_configured_room_capacity_for_any_subject_names(self):
         item = self.fixture(with_plan=False)
-        plan = models.CoursePlan(subject_name="Преддипломная", total_hours=3, group_id=item.group.id, term_id=item.term.id, academic_year_id=item.year.id)
-        self.db.add(plan)
+        item.room.max_simultaneous_groups = 2
+        item.group.weekly_hours = 4
+        item.term.start_date = item.term.end_date = date(2026, 9, 1)
+        second_teacher = models.Teacher(name="Second instructor", max_hours_per_week=20)
+        second_group = models.Group(number=346, course=1, weekly_hours=4, semester_weeks=1)
+        self.db.add_all([second_teacher, second_group]); self.db.flush()
+        second_term = models.GroupTerm(
+            academic_year_id=item.year.id, group_id=second_group.id, term_number=1,
+            name="1 семестр", start_week=1, weeks=1,
+            start_date=date(2026, 9, 1), end_date=date(2026, 9, 1), is_active=True,
+        )
+        self.db.add(second_term); self.db.flush()
+        first_plan = models.CoursePlan(
+            subject_name="Advanced systems", total_hours=4, max_weekly_hours=4,
+            group_id=item.group.id, teacher_id=item.teacher.id, room_name=item.room.name,
+            term_id=item.term.id, academic_year_id=item.year.id,
+        )
+        second_plan = models.CoursePlan(
+            subject_name="Applied analysis", total_hours=4, max_weekly_hours=4,
+            group_id=second_group.id, teacher_id=second_teacher.id, room_name=item.room.name,
+            term_id=second_term.id, academic_year_id=item.year.id,
+        )
+        self.db.add_all([first_plan, second_plan]); self.db.commit()
+        success, message = solver.solve_global_week(
+            self.db, 1, [item.group, second_group], [item.teacher, second_teacher], [item.room],
+            [first_plan, second_plan], terms_by_group={item.group.id: item.term, second_group.id: second_term},
+        )
+        self.assertTrue(success, message)
+        entries = self.db.query(models.ScheduleEntry).all()
+        self.assertEqual(len(entries), 8)
+        occupancy = {}
+        for entry in entries:
+            key = (entry.room_name, entry.day_of_week, entry.time_slot)
+            occupancy[key] = occupancy.get(key, 0) + 1
+        self.assertEqual(max(occupancy.values()), 2)
+
+    def test_cp_sat_respects_explicit_generation_and_room_policy(self):
+        item = self.fixture(with_plan=False)
+        disabled = models.CoursePlan(
+            subject_name="Arbitrary external activity", total_hours=4,
+            group_id=item.group.id, teacher_id=item.teacher.id, room_name=item.room.name,
+            term_id=item.term.id, academic_year_id=item.year.id, auto_schedule=False,
+        )
+        no_room = models.CoursePlan(
+            subject_name="Any named remote session", total_hours=4,
+            group_id=item.group.id, teacher_id=item.teacher.id,
+            term_id=item.term.id, academic_year_id=item.year.id, requires_room=False,
+        )
+        self.db.add_all([disabled, no_room])
         self.db.commit()
-        success, _ = solver.solve_global_week(self.db, 1, [item.group], [item.teacher], [item.room], [plan], terms_by_group={item.group.id: item.term})
-        self.assertTrue(success)
-        self.assertEqual(self.db.query(models.ScheduleEntry).count(), 0)
+        demands = solver.build_subject_demands(
+            self.db, [item.group], [disabled, no_room], [], 1,
+            {item.group.id: item.term},
+        )
+        self.assertEqual([demand.plan.id for demand in demands], [no_room.id])
+        success, message = solver.solve_global_week(
+            self.db, 1, [item.group], [item.teacher], [item.room], [disabled, no_room],
+            terms_by_group={item.group.id: item.term},
+        )
+        self.assertTrue(success, message)
+        entries = self.db.query(models.ScheduleEntry).all()
+        self.assertEqual(len(entries), 4)
+        self.assertTrue(all(entry.subject_name == no_room.subject_name for entry in entries))
+        self.assertTrue(all(entry.room_name == "Без кабинета" and entry.room2_name is None for entry in entries))
+
+    def test_room_capacity_is_generic_for_manual_schedule(self):
+        item = self.fixture(with_plan=False)
+        changed = self.client.put(f"/rooms/{item.room.id}", json={
+            "name": "Shared resource", "max_simultaneous_groups": 2,
+        })
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["max_simultaneous_groups"], 2)
+        item.room.name = "Shared resource"
+        second_teacher = models.Teacher(name="Second teacher", max_hours_per_week=20)
+        second_group = models.Group(number=346, course=1, weekly_hours=4, semester_weeks=1)
+        self.db.add_all([second_teacher, second_group]); self.db.flush()
+        second_term = models.GroupTerm(
+            academic_year_id=item.year.id, group_id=second_group.id, term_number=1,
+            name="1 семестр", start_week=1, weeks=1,
+            start_date=date(2026, 9, 1), end_date=date(2026, 9, 7), is_active=True,
+        )
+        third_teacher = models.Teacher(name="Third teacher", max_hours_per_week=20)
+        third_group = models.Group(number=347, course=1, weekly_hours=4, semester_weeks=1)
+        self.db.add_all([second_term, third_teacher, third_group]); self.db.flush()
+        third_term = models.GroupTerm(
+            academic_year_id=item.year.id, group_id=third_group.id, term_number=1,
+            name="1 семестр", start_week=1, weeks=1,
+            start_date=date(2026, 9, 1), end_date=date(2026, 9, 7), is_active=True,
+        )
+        self.db.add(third_term); self.db.commit()
+        base = {"week_number": 1, "day_of_week": 2, "time_slot": 1,
+                "room_name": "Shared resource", "academic_year_id": item.year.id}
+        first = base | {"teacher_id": item.teacher.id, "group_id": item.group.id,
+                        "subject_name": "Any subject A", "term_id": item.term.id}
+        second = base | {"teacher_id": second_teacher.id, "group_id": second_group.id,
+                         "subject_name": "Any subject B", "term_id": second_term.id}
+        third = base | {"teacher_id": third_teacher.id, "group_id": third_group.id,
+                        "subject_name": "Any subject C", "term_id": third_term.id}
+        self.assertEqual(self.client.post("/schedule/", json=first).status_code, 200)
+        self.assertEqual(self.client.post("/schedule/", json=second).status_code, 200)
+        self.assertEqual(self.client.post("/schedule/", json=third).status_code, 409)
+
+    def test_course_plan_policy_roundtrip_clears_room_for_no_room_plan(self):
+        item = self.fixture(with_plan=False)
+        payload = {
+            "subject_name": "Independent work", "total_hours": 6, "max_weekly_hours": 2,
+            "teacher_id": item.teacher.id, "group_id": item.group.id, "term_id": item.term.id,
+            "room_name": item.room.name, "auto_schedule": False, "requires_room": False,
+        }
+        created = self.client.post("/course_plans/", json=payload)
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertFalse(created.json()["auto_schedule"])
+        self.assertFalse(created.json()["requires_room"])
+        self.assertIsNone(created.json()["room_name"])
 
     def test_cp_sat_respects_teacher_working_days(self):
         item = self.fixture()

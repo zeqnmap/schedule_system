@@ -11,7 +11,7 @@
     <script src="../js/auth.js" defer></script>
     <script src="../js/app-nav.js?v=20260933" defer></script>
     <script src="../js/searchable-select.js"></script>
-    <script src="../js/teachers.js?v=vacation-weeks-1" defer></script>
+    <script src="../js/teachers.js?v=20261021-resource-capacity" defer></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body class="page-teachers text-slate-800 antialiased min-h-screen">
@@ -54,15 +54,21 @@
                         <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Номер/название кабинета</label>
                         <input v-model="newRoom.name" type="text" required placeholder="Напр. 15, Актовый зал" class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
                     </div>
-                    <button type="submit" class="w-full btn-emerald font-extrabold text-base py-4 rounded-2xl">Добавить кабинет</button>
+                    <div>
+                        <label class="block text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">Групп одновременно</label>
+                        <input v-model.number="newRoom.max_simultaneous_groups" type="number" min="1" max="100" required class="input-modern w-full px-5 py-4 text-slate-900 font-bold text-lg">
+                    </div>
+                    <button type="submit" class="w-full btn-emerald font-extrabold text-base py-4 rounded-2xl">{{ editingRoomId ? 'Сохранить кабинет' : 'Добавить кабинет' }}</button>
+                    <button v-if="editingRoomId" @click="resetRoomForm" type="button" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-2xl transition-all">Отмена</button>
                 </form>
 
                 <div class="space-y-4 overflow-y-auto max-h-[600px] pr-3">
                     <div v-for="r in rooms" :key="r.id" class="group flex justify-between items-center p-5 rounded-2xl bg-white border border-slate-100 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.02)] hover:border-slate-200 transition-all">
-                        <span class="font-extrabold text-lg text-slate-800 tracking-tight">Каб. {{ r.name }}</span>
+                        <span class="font-extrabold text-lg text-slate-800 tracking-tight">Каб. {{ r.name }} <small class="ml-1 text-xs text-slate-400">до {{ r.max_simultaneous_groups }} гр.</small></span>
                         <!-- Показываем, кто занял кабинет, если он занят -->
                         <span v-if="getRoomOccupant(r.id)" class="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-1 rounded truncate ml-2 max-w-[100px]">{{ getRoomOccupant(r.id) }}</span>
-                        <button @click="deleteRoom(r.id)" class="btn-coral font-bold px-4 py-2 rounded-xl text-xs opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity ml-auto">Удалить</button>
+                        <button @click="editRoom(r)" class="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold px-4 py-2 rounded-xl text-xs border border-slate-200 ml-auto">Изменить</button>
+                        <button @click="deleteRoom(r.id)" class="btn-coral font-bold px-4 py-2 rounded-xl text-xs opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">Удалить</button>
                     </div>
                     <div v-if="rooms.length === 0" class="text-center text-slate-400 py-12 font-bold text-lg">Нет добавленных кабинетов.</div>
                 </div>

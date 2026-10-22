@@ -99,5 +99,5 @@ createApp({ setup() {
         const current = curatorAssignments.value[groupId]?.[index]?.room_name;
         return rooms.value.filter(room => room.name === current || !selectedElsewhere.has(room.name));
     };
-    onMounted(load); return { subjects, groups, teachers, rooms, rules, curatorHours, curatorAssignments, days, curatorCount, curatorForms, curatorForm: curatorForms.value[0], error, notice, curatorNotice, curatorError, scope, form, courses, calendarScope, calendarMonth, calendarTitle, calendarDays, groupBreaks, breakRangeStart, selectCalendarScope, toggleCalendarDay, formatBreakDate, load, createRule, removeRule, createCuratorHours, createCuratorHour, removeCuratorHour, previousMonth, nextMonth, scopeLabel, termLabel, modeLabel, availableCuratorRooms };
+    onMounted(load); return { subjects, groups, teachers, rooms, rules, curatorHours, curatorAssignments, days, daysOff, curatorCount, curatorForms, curatorForm: curatorForms.value[0], error, notice, curatorNotice, curatorError, scope, form, courses, calendarScope, calendarMonth, calendarTitle, calendarDays, groupBreaks, breakRangeStart, selectCalendarScope, toggleCalendarDay, formatBreakDate, load, createRule, removeRule, createCuratorHours, createCuratorHour, removeCuratorHour, previousMonth, nextMonth, scopeLabel, termLabel, modeLabel, availableCuratorRooms };
 } }).mount('#app');
