@@ -383,6 +383,28 @@ class ScheduleSystemTests(unittest.TestCase):
         self.assertIn("toggleCalendarDay", script)
         self.assertNotIn("breakCalendarMonth", script)
 
+    def test_empty_group_can_be_deleted_with_its_automatic_term(self):
+        year = models.AcademicYear(
+            name="2026-2027", start_date=date(2026, 9, 1),
+            end_date=date(2027, 8, 31), is_active=True,
+        )
+        group = models.Group(number=691, course=1, semester_weeks=20)
+        self.db.add_all([year, group])
+        self.db.flush()
+        self.db.add(models.GroupTerm(
+            academic_year_id=year.id, group_id=group.id, term_number=1,
+            name="1 семестр", start_week=1, weeks=20,
+            start_date=date(2026, 9, 1), end_date=date(2027, 1, 17),
+            is_active=True, is_locked=False,
+        ))
+        self.db.commit()
+        group_id = group.id
+        response = self.client.delete(f"/groups/{group_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.expire_all()
+        self.assertIsNone(self.db.get(models.Group, group_id))
+        self.assertEqual(self.db.query(models.GroupTerm).filter_by(group_id=group_id).count(), 0)
+
     def test_pydantic_rejects_out_of_range_schedule_coordinates(self):
         base = dict(week_number=1, day_of_week=1, time_slot=1, room_name="101", group_id=1, subject_name="Math")
         for field, value in (("week_number", 0), ("week_number", 54), ("day_of_week", 0), ("day_of_week", 7), ("time_slot", 0), ("time_slot", 13)):

@@ -736,8 +736,15 @@ def delete_group(group_id: int, _: models.User = Depends(require_admin), db: Ses
         raise HTTPException(status_code=404, detail="Группа не найдена")
     if db.query(models.CoursePlan).filter_by(group_id=group_id).first() or db.query(models.ScheduleEntry).filter_by(group_id=group_id).first():
         raise HTTPException(status_code=409, detail="Группа используется в учебных планах или расписании")
-    if db.query(models.GroupTerm).filter_by(group_id=group_id).first() or db.query(models.GroupBreakDay).filter_by(group_id=group_id).first() or db.query(models.ArchivedWeek).filter_by(group_id=group_id).first() or db.query(models.GroupCuratorHourOverride).filter_by(group_id=group_id).first() or db.query(models.CuratorHour).filter_by(group_id=group_id).first():
-        raise HTTPException(status_code=409, detail="Группа используется в настройках учебного периода или кураторских часах")
+    if db.query(models.GroupTerm).filter_by(group_id=group_id, is_locked=True).first():
+        raise HTTPException(status_code=409, detail="Группа содержит завершённый семестр и не может быть удалена")
+    # A new group receives an empty first term automatically. Remove that
+    # metadata together with the otherwise unused group.
+    db.query(models.GroupCuratorHourOverride).filter_by(group_id=group_id).delete(synchronize_session=False)
+    db.query(models.GroupBreakDay).filter_by(group_id=group_id).delete(synchronize_session=False)
+    db.query(models.ArchivedWeek).filter_by(group_id=group_id).delete(synchronize_session=False)
+    db.query(models.CuratorHour).filter_by(group_id=group_id).delete(synchronize_session=False)
+    db.query(models.GroupTerm).filter_by(group_id=group_id).delete(synchronize_session=False)
     db.delete(group)
     db.commit()
     return {"ok": True}
