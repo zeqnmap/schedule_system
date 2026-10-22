@@ -3,6 +3,6 @@ uvicorn
 sqlalchemy
 # NumPy 2 wheels require x86-64-v2, which is unavailable on the deployment VM.
 numpy==1.26.4
-ortools==9.15.6755
+ortools==9.14.6206
 pydantic
 reportlab
