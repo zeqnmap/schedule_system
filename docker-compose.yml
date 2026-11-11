@@ -1,6 +1,11 @@
 services:
   api:
-    build: .
+    build:
+      context: .
+      # The deployment host's DNS works, while Docker's default build
+      # network may fail to resolve deb.debian.org (the font package is
+      # installed in Dockerfile).
+      network: host
     container_name: schedule_system
     ports:
       - "127.0.0.1:8000:8000"
