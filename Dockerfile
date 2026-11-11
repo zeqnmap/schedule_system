@@ -1,6 +1,8 @@
 FROM python:3.11-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+# Keep PDF rendering independent of apt/Docker DNS on the deployment host.
+COPY fonts/DejaVuSans.ttf /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+COPY fonts/DejaVuSans-Bold.ttf /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 # Копируем backend и frontend в единый контейнер приложения
