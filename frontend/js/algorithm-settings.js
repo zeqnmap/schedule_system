@@ -1,6 +1,7 @@
 const { createApp, ref, computed, onMounted } = Vue;
 createApp({ setup() {
     const subjects = ref([]), groups = ref([]), teachers = ref([]), rooms = ref([]), rules = ref([]), curatorHours = ref([]), years = ref([]), daysOff = ref([]), groupBreaks = ref([]), error = ref(''), notice = ref(''), curatorNotice = ref(''), curatorError = ref(''), scope = ref('course');
+    const generatedDeleteMode = ref('generated'), generatedDeletePassword = ref(''), generatedDeleteError = ref(''), generatedDeleteNotice = ref(''), generatedDeleteBusy = ref(false);
     const calendarMonth = ref('');
     const calendarScope = ref('all'), groupTerms = ref([]), breakRangeStart = ref('');
     const curatorCount = ref(1);
@@ -77,6 +78,18 @@ createApp({ setup() {
         } catch (err) { error.value = err.message; }
     };
     const toggleCalendarDay = day => calendarScope.value === 'all' ? toggleDayOff(day) : toggleGroupBreak(day);
+    const deleteGeneratedSchedule = async () => {
+        if (!generatedDeletePassword.value) { generatedDeleteError.value = 'Введите пароль текущего аккаунта.'; return; }
+        generatedDeleteBusy.value = true;
+        generatedDeleteError.value = '';
+        generatedDeleteNotice.value = '';
+        try {
+            const result = await request('/schedule/generated-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: generatedDeletePassword.value, mode: generatedDeleteMode.value }) });
+            generatedDeleteNotice.value = `Удалено занятий: ${result.deleted}.`;
+            generatedDeletePassword.value = '';
+        } catch (err) { generatedDeleteError.value = err.message; }
+        finally { generatedDeleteBusy.value = false; }
+    };
     const createRule = async () => { error.value = ''; const payload = { ...form.value, group_id: scope.value === 'group' ? form.value.group_id : null, course: scope.value === 'course' ? form.value.course : null }; try { await request('/algorithm-rules/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await load(); } catch (err) { error.value = err.message; } };
     const removeRule = async rule => { if (!confirm(`Удалить правило для «${rule.subject_name}»?`)) return; try { await request(`/algorithm-rules/${rule.id}`, { method: 'DELETE' }); await load(); } catch (err) { error.value = err.message; } };
     const createCuratorHours = async () => { curatorNotice.value = ''; curatorError.value = ''; try { const global = curatorHours.value.filter(item => !Number(item.group_id)); for (const item of global) await request(`/curator-hours/${item.id}`, { method: 'DELETE' }); for (const curator of curatorForms.value.slice(0, curatorCount.value)) await request('/curator-hours/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...curator, group_id: 0, teacher_id: null, room_name: null, hour_type: curator.hour_type || 'curator' }) }); await load(); curatorNotice.value = `Сохранено общих часов: ${curatorCount.value}.`; } catch (err) { curatorError.value = err.message; } };
@@ -99,5 +112,5 @@ createApp({ setup() {
         const current = curatorAssignments.value[groupId]?.[index]?.room_name;
         return rooms.value.filter(room => room.name === current || !selectedElsewhere.has(room.name));
     };
-    onMounted(load); return { subjects, groups, teachers, rooms, rules, curatorHours, curatorAssignments, days, daysOff, curatorCount, curatorForms, curatorForm: curatorForms.value[0], error, notice, curatorNotice, curatorError, scope, form, courses, calendarScope, calendarMonth, calendarTitle, calendarDays, groupBreaks, breakRangeStart, selectCalendarScope, toggleCalendarDay, formatBreakDate, load, createRule, removeRule, createCuratorHours, createCuratorHour, removeCuratorHour, previousMonth, nextMonth, scopeLabel, termLabel, modeLabel, availableCuratorRooms };
+    onMounted(load); return { subjects, groups, teachers, rooms, rules, curatorHours, curatorAssignments, days, daysOff, curatorCount, curatorForms, curatorForm: curatorForms.value[0], error, notice, curatorNotice, curatorError, scope, form, courses, calendarScope, calendarMonth, calendarTitle, calendarDays, groupBreaks, breakRangeStart, selectCalendarScope, toggleCalendarDay, formatBreakDate, load, createRule, removeRule, createCuratorHours, createCuratorHour, removeCuratorHour, previousMonth, nextMonth, scopeLabel, termLabel, modeLabel, availableCuratorRooms, generatedDeleteMode, generatedDeletePassword, generatedDeleteError, generatedDeleteNotice, generatedDeleteBusy, deleteGeneratedSchedule };
 } }).mount('#app');

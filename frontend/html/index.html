@@ -162,9 +162,6 @@
             <button @click="changeWeeklyHoursPrompt" class="schedule-toolbar__hours bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-extrabold text-sm transition-all flex items-center justify-center gap-2">
                 Уроков за неделю: <span class="text-emerald-600">{{ currentWeekActualHours }}</span> / {{ currentGroupWeeklyHours }}
             </button>
-            <button @click="toggleSaturdayForGroup" :class="currentGroupHasSaturday ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="schedule-toolbar__saturday px-5 py-3.5 rounded-2xl font-extrabold text-sm border transition-all flex items-center justify-center gap-2">
-                {{ currentGroupHasSaturday ? '📅 6 дней (суббота вкл)' : '☕ 5 дней (без субботы)' }}
-            </button>
             <div class="schedule-toolbar__locks flex gap-2">
                 <button @click="toggleArchive" :class="isArchived ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-700 border-slate-200'" class="px-4 py-3.5 rounded-2xl font-extrabold text-xs border transition-all" :title="`Только группа ${currentGroupNumber}`">
                     {{ isArchived ? '🔓 Группа' : '🔒 Группа' }}

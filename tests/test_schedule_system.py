@@ -644,6 +644,37 @@ class ScheduleSystemTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.db.query(models.ScheduleEntry).filter_by(term_id=item.term.id).count(), 2)
 
+    def test_generated_schedule_delete_requires_password_and_only_removes_generated_rows(self):
+        item = self.fixture(with_plan=False)
+        other_group = models.Group(number=346, course=1)
+        self.db.add(other_group)
+        self.db.flush()
+        self.db.add_all([
+            models.ScheduleEntry(week_number=1, day_of_week=1, time_slot=1, room_name="101", group_id=item.group.id, subject_name="Auto 1", term_id=item.term.id, academic_year_id=item.year.id, is_generated=True),
+            models.ScheduleEntry(week_number=2, day_of_week=1, time_slot=1, room_name="101", group_id=item.group.id, subject_name="Auto 2", term_id=item.term.id, academic_year_id=item.year.id, is_generated=True),
+            models.ScheduleEntry(week_number=1, day_of_week=2, time_slot=1, room_name="101", group_id=item.group.id, subject_name="Manual", term_id=item.term.id, academic_year_id=item.year.id, is_generated=False),
+            models.ScheduleEntry(week_number=1, day_of_week=3, time_slot=1, room_name="101", group_id=other_group.id, subject_name="Other group", academic_year_id=item.year.id, is_generated=True),
+        ])
+        admin = self.db.get(models.User, 1)
+        admin.password_hash = main.hash_password("delete-pass")
+        self.db.commit()
+
+        denied = self.client.post("/schedule/generated-delete", json={"password": "wrong"})
+        self.assertEqual(denied.status_code, 401)
+        response = self.client.post("/schedule/generated-delete", json={"password": "delete-pass"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["deleted"], 3)
+        self.assertEqual(self.db.query(models.ScheduleEntry).filter_by(subject_name="Auto 1").count(), 0)
+        self.assertEqual(self.db.query(models.ScheduleEntry).filter_by(subject_name="Auto 2").count(), 0)
+        self.assertEqual(self.db.query(models.ScheduleEntry).filter_by(subject_name="Manual").count(), 1)
+        self.assertEqual(self.db.query(models.ScheduleEntry).filter_by(subject_name="Other group").count(), 0)
+        self.assertEqual(self.db.query(models.ScheduleEntry).filter_by(is_generated=True).count(), 0)
+        self.assertEqual(self.db.query(models.ScheduleEntry).filter_by(subject_name="Manual").count(), 1)
+        manual_response = self.client.post("/schedule/generated-delete", json={"password": "delete-pass", "mode": "manual"})
+        self.assertEqual(manual_response.status_code, 200, manual_response.text)
+        self.assertEqual(manual_response.json()["deleted"], 1)
+        self.assertEqual(self.db.query(models.ScheduleEntry).count(), 0)
+
     def test_academic_day_off_is_idempotent_and_removes_only_date_entries(self):
         item = self.fixture()
         on_date = models.ScheduleEntry(week_number=1, day_of_week=2, time_slot=1, room_name="101", group_id=item.group.id, subject_name="Math", academic_year_id=item.year.id, term_id=item.term.id, schedule_date=date(2026, 9, 2))

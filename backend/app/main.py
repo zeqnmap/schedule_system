@@ -1380,6 +1380,26 @@ def get_schedule(group_id: Optional[int] = None, week_number: int = 1, term_id: 
     return query.order_by(models.ScheduleEntry.day_of_week, models.ScheduleEntry.time_slot).all()
 
 
+@app.post("/schedule/generated-delete")
+def delete_generated_schedule(
+    data: schemas.GeneratedScheduleDeleteRequest,
+    current: models.User = Depends(require_admin),
+    db: Session = Depends(database.get_db),
+):
+    """Delete only rows created by the automatic schedule generator."""
+    if not verify_password(data.password, current.password_hash):
+        raise HTTPException(status_code=401, detail="Неверный пароль текущего аккаунта")
+    query = db.query(models.ScheduleEntry).filter(
+        models.ScheduleEntry.is_generated.is_(data.mode == "generated")
+    )
+    entries = query.all()
+    deleted = len(entries)
+    for entry in entries:
+        db.delete(entry)
+    db.commit()
+    return {"ok": True, "deleted": deleted}
+
+
 @app.get("/schedule/available-options")
 def get_schedule_available_options(group_id: int, term_id: int, week_number: int, day_of_week: int, time_slot: int, exclude_entry_id: Optional[int] = None, db: Session = Depends(database.get_db)):
     term = db.query(models.GroupTerm).filter_by(id=term_id, group_id=group_id).first()

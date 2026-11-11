@@ -1,0 +1,21 @@
+ip -br -4 addr -- узнать IP сервера
+
+
+ssh-keygen -t ed25519 -- создание ключа, чтобы входить без пароля
+ssh-copy-id deploy@192.168.1.20 -- скопировать ключ на сервер
+
+
+openssl rand -hex 32 -- создать BOT_SHARED_SECRET, который используется и на сайте и в боте
+
+
+open -e /Users/yaroslavmanko/Documents/schedule-deploy/deploy.config -- открыть конфиг и проверить значения
+
+
+cd /Users/yaroslavmanko/Documents/schedule-deploy
+chmod +x bootstrap-server.sh deploy.sh
+./bootstrap-server.sh -- установка всего нужного на сервер(докер гит) и автоматические создание папки
+ssh deploy@192.168.1.20 -- зайти на сайт, чтобы обновились права на докер
+
+
+cd /Users/yaroslavmanko/Documents/schedule-deploy
+./deploy.sh -- скрипт на деплой(автоматически подключится к серверу и клонирует проекты

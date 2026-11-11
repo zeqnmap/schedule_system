@@ -129,6 +129,13 @@ class ScheduleEntryUpdate(BaseModel):
     academic_year_id: Optional[int] = None
     schedule_date: Optional[date] = None
 
+
+class GeneratedScheduleDeleteRequest(BaseModel):
+    """Password confirmation for deleting generated timetable rows only."""
+
+    password: str = Field(min_length=1)
+    mode: Literal["generated", "manual"] = "generated"
+
     model_config = ConfigDict(from_attributes=True)
 
 
